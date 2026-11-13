@@ -32,7 +32,7 @@ pub fn run(args: Args, ctx: &Context) -> Result<()> {
     if let VersionCheck::RepoNewer { .. } = check {
         check.enforce()?;
     }
-    for line in socle::migrate::run(root, &Instances::default_path()?)? {
+    for line in socle::migrate::run(root, &config.init.name, &Instances::default_path()?)? {
         println!("{line}");
     }
     // `--force` rewrites the socle at the same version: a file deleted or

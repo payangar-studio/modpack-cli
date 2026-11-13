@@ -21,7 +21,7 @@ use std::sync::Once;
 
 use include_dir::{Dir, include_dir};
 
-use crate::error::{Context, Result};
+use crate::error::{Context, Error, Result};
 use crate::model::manifest::{self, Manifest, Pack};
 use crate::model::socle::{
     InitValues, LockedFile, LockedKind, SocleConfig, SocleLock, cli_version, compare_versions,
@@ -122,8 +122,19 @@ fn under(root: &Path, path: &str) -> PathBuf {
 /// Checks the repository's socle version against the CLI's, at the start of
 /// every command that works in a repository: a newer socle is refused, an
 /// older one gives a warning, once per process, that suggests `modpack update`.
+/// A repository `modpack update` has not migrated yet is refused: without
+/// `variants.toml`, the commands would skip its checks or start a new one.
 pub fn check_version(root: &Path) -> Result<()> {
     static WARNED: Once = Once::new();
+    if root.join(migrate::OLD_FILE).is_file() {
+        return Err(Error::usage(
+            format!(
+                "this repository still holds {}, written before variants",
+                migrate::OLD_FILE
+            ),
+            "run `modpack update` to rename it to variants.toml",
+        ));
+    }
     let config = SocleConfig::load(root)?;
     if let Some(warning) = compare_versions(&config.version, &cli_version())?.enforce()? {
         WARNED.call_once(|| tracing::warn!("{warning}"));
@@ -500,5 +511,14 @@ mod tests {
         config.version = "0.0.1".into();
         config.save(dir.path()).unwrap();
         check_version(dir.path()).unwrap();
+    }
+
+    #[test]
+    fn version_check_refuses_a_repository_not_migrated_to_variants() {
+        let dir = initialised();
+        fs::write(dir.path().join("modes.toml"), "[default]\n").unwrap();
+        let err = check_version(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("modes.toml"), "{err}");
+        assert!(err.hint().contains("modpack update"), "{err}");
     }
 }

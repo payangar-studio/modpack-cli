@@ -570,6 +570,25 @@ mod tests {
     }
 
     #[test]
+    fn reference_doc_example_is_valid_and_names_every_condition() {
+        let doc = include_str!("../../docs/modes.md");
+        let example = doc
+            .split("```toml\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\n```").next())
+            .unwrap();
+        let modes = Modes::parse(example).unwrap();
+        assert_eq!(modes.validate(&manifest()), Vec::new());
+        assert_eq!(modes.names(), ["default", "hardcore", "server"]);
+        for name in crate::conditions::NAMES {
+            assert!(
+                doc.contains(&format!("| `{name}` |")),
+                "{name} undocumented"
+            );
+        }
+    }
+
+    #[test]
     fn durations_take_seconds_minutes_hours() {
         assert_eq!(parse_duration("90s"), Some(Duration::from_secs(90)));
         assert_eq!(parse_duration("3m"), Some(Duration::from_secs(180)));

@@ -1,1 +1,10 @@
-# Minimal socle marker for root detection tests.
+# Managed by modpack-cli. `modpack update` rewrites the version and keeps the values.
+
+version = "0.1.0"
+
+[init]
+name = "Fixture Pack"
+minecraft = "1.21.1"
+loader = "neoforge"
+loader-version = "21.1.77"
+author = "Fixture Author"

@@ -96,3 +96,15 @@ fn the_caller_pins_this_release() {
         "the CLI is not pinned to {tag}"
     );
 }
+
+#[test]
+fn the_reusable_workflow_builds_the_packs_without_the_jars() {
+    let workflow = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/publish-modpack.yml"),
+    )
+    .unwrap();
+    assert!(workflow.contains("modpack pack "));
+    for step in ["modpack install", "modpack manifest"] {
+        assert!(!workflow.contains(step), "the workflow runs `{step}`");
+    }
+}

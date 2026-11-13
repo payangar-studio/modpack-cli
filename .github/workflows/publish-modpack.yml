@@ -149,9 +149,9 @@ jobs:
             --data-urlencode "environment=$VAULT_ENVIRONMENT" \
             --data-urlencode "secretPath=$VAULT_PATH" \
             "$vault/api/v3/secrets/raw")
-          # Named like the variables the CLI reads, so `modpack install` finds
-          # the CurseForge API key. A missing one only fails the step that needs it.
-          for name in MODPACK_MODRINTH_TOKEN MODPACK_CURSEFORGE_UPLOAD_TOKEN MODPACK_CURSEFORGE_API_KEY; do
+          # Named like the variables the CLI reads. A missing one only fails
+          # the step that needs it.
+          for name in MODPACK_MODRINTH_TOKEN MODPACK_CURSEFORGE_UPLOAD_TOKEN; do
             value=$(jq -r --arg name "$name" '.secrets[] | select(.secretKey == $name) | .secretValue' <<<"$secrets")
             if [[ -n "$value" ]]; then
               echo "::add-mask::$value"
@@ -161,12 +161,8 @@ jobs:
             fi
           done
 
-      - name: Install the mods
-        run: modpack install
-
-      - name: Check the manifest
-        run: modpack manifest --check
-
+      # `pack` builds from the manifest, config and overrides alone: no jar is
+      # downloaded, so the CI needs no CurseForge API key.
       - name: Build the packs
         id: pack
         env:

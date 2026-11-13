@@ -72,6 +72,9 @@ pub struct LoadReport {
 /// where a jar of the mode goes.
 pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport> {
     let root = ctx.root;
+    // The mode first: an unknown mode is reported before a missing instance.
+    let manifest = load_manifest(root)?;
+    let resolved = load_modes(root)?.resolve(mode, &manifest)?;
     let instance = find_instance(root, ctx.instances_file)?;
     if ctx.game.is_running(&instance)? {
         return Err(Error::blocked(
@@ -96,8 +99,6 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
         ));
     }
 
-    let manifest = load_manifest(root)?;
-    let resolved = load_modes(root)?.resolve(mode, &manifest)?;
     let wanted: Vec<&Entry> = resolved
         .keys
         .iter()

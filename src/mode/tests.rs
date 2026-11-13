@@ -365,6 +365,16 @@ fn unknown_mode_is_a_usage_error() {
 }
 
 #[test]
+fn unknown_mode_is_reported_before_a_missing_instance() {
+    let s = Setup::new();
+    Instances::default().save(&s.instances_file()).unwrap();
+    let err = s.load("lowend", false).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Usage);
+    assert!(err.to_string().contains("lowend"), "{err}");
+    assert!(!err.to_string().contains("no Modrinth instance"), "{err}");
+}
+
+#[test]
 fn loaded_mode_reads_the_instance_state() {
     let s = Setup::new();
     let loaded = || loaded_mode(s.root(), &s.instances_file()).unwrap();

@@ -25,9 +25,10 @@ The Modrinth App must be installed for `modpack setup` to create the pack's inst
 | `modpack init [dir] --name --mc-version --loader --loader-version --author` | Creates a modpack repository: socle, layout, default mode. Asks for each value not given. |
 | `modpack setup [--no-launch]` | Prepares a clone on this machine: enables the git hooks, downloads the jars, registers the instance in the Modrinth App (one click to confirm the import), loads the default mode. Safe to run again. |
 | `modpack update [--force]` | Brings the repository's socle to this CLI's version. Stops on socle files edited by hand, unless `--force`. |
-| `modpack add <mod> [--version] [--mode] [--with-deps] [--url]` | Adds a mod from Modrinth or CurseForge (slug, id or URL) or from a local jar, and updates the manifest. Asks for the version when several fit. On a mod already in the pack, `--with-deps` adds only its missing dependencies. |
+| `modpack add <mod> [--version] [--mode] [--with-deps] [--url]` | Adds a mod from Modrinth or CurseForge (slug, id or URL) or from a local jar, and updates the manifest. Asks for the version when several fit. On a mod already in the pack, `--with-deps` adds only its missing dependencies. A mod from a platform under the key of a local mod replaces it, and its jar leaves git. |
 | `modpack remove <key>` | Removes a mod from the repository and from the modes that list it. The only way a mod leaves the pack. |
-| `modpack manifest [--check]` | Updates `mods.lock.toml` from `mods/`: adds the new jars, rebuilds the entries whose jar changed, and asks again the platforms an entry has no ids for (CurseForge ids missing because no Core API key was set, say). A jar missing from `mods/` keeps its entry, with a warning (not installed here is not removed). A jar `modpack install` downloaded that the manifest no longer lists is never added back. `--check` fails when it is stale. Both then check `modes.toml` against the manifest (unknown keys, unknown conditions). Run by the `pre-commit` hook. |
+| `modpack manifest [--check]` | Updates `mods.lock.toml` from `mods/` and `mods-local/`: adds the new jars (a jar of `mods-local/` as a local mod, asking no platform), rebuilds the entries whose jar changed, and asks again the platforms an entry has no ids for (CurseForge ids missing because no Core API key was set, say). A jar missing from `mods/` keeps its entry, with a warning (not installed here is not removed). A jar `modpack install` downloaded that the manifest no longer lists is never added back. `--check` fails when it is stale. Both then check `modes.toml` against the manifest (unknown keys, unknown conditions). Run by the `pre-commit` hook. |
+| `modpack approve <key>`, `modpack approve --check` | Approves a local mod for publication: records the sha512 of its jar in the manifest. `--check` fails while a local mod is not approved; the publish workflow runs it. |
 | `modpack install [--force]` | Downloads the missing jars into `mods/`, removes the ones it downloaded that the manifest no longer lists (recorded in `.modpack/local/installed.toml`), then reloads the mode loaded in the instance. Run by the `post-merge` and `post-checkout` hooks. |
 | `modpack mode list` | Lists the modes and marks the loaded one. |
 | `modpack mode load <mode> [--force]` | Loads a mode into the instance: its jars, the base config and its overrides; removes the config files written for the previous mode. Refuses while Minecraft runs; stops on files changed in the instance, and on config files of the instance it did not write that the mode would change, unless `--force`. |
@@ -37,7 +38,7 @@ The Modrinth App must be installed for `modpack setup` to create the pack's inst
 | `modpack page push [--platform]` | Pushes `page/` to the platforms that have an API (Modrinth, slug included once the project exists) and names the skill to run for the others (CurseForge). Never in CI. |
 | `modpack auth [secret] [--status] [--remove <secret>]` | Stores the platform secrets in the system keyring, with masked input. |
 
-The modes of a pack and their conditions are written in `modes.toml`, described in [`docs/modes.md`](docs/modes.md).
+The modes of a pack and their conditions are written in `modes.toml`, described in [`docs/modes.md`](docs/modes.md). Mods no platform serves are tracked by git in `mods-local/` and approved before publication: see [`docs/local-mods.md`](docs/local-mods.md).
 
 Every command runs without a terminal (AI agent, git hook, CI): it then asks nothing, and a missing value is an error that names the argument to pass. Errors say what happened and what to do. Exit codes: `0` success, `1` internal failure, `2` usage error (missing or wrong argument, not in a modpack repository), `3` refused: overridable with `--force`, or a check that did not pass (a failed `modpack test` condition, a platform `modpack pack` cannot build for). `-v` and `-q` set how much is logged on stderr.
 
@@ -61,9 +62,10 @@ Pushing a `v*` tag on `main` of the pack:
 
 1. checks that the tagged commit is on `origin/main`, and stops otherwise (a guard against a tag on a work branch, not a security boundary);
 2. installs `modpack` from this repository's release;
-3. runs `modpack pack` for each published mode, which builds from the manifest alone: no jar is downloaded;
-4. reads the secrets from the vault (Infisical) by OIDC, as the identity `ci-minecraft`;
-5. creates a version on Modrinth and uploads a file to CurseForge for each pack. A platform that fails does not stop the other.
+3. stops when a local mod is not approved (`modpack approve --check`), naming each one and the command to run; a dry run only warns;
+4. runs `modpack pack` for each published mode, which builds from the manifest and the jars of `mods-local/`: no jar is downloaded;
+5. reads the secrets from the vault (Infisical) by OIDC, as the identity `ci-minecraft`;
+6. creates a version on Modrinth and uploads a file to CurseForge for each pack. A platform that fails does not stop the other.
 
 What each pack repository needs, once:
 

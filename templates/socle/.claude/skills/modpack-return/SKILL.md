@@ -84,8 +84,8 @@ rm -rf "<probe>"
 
 A mod creates its config files the first time the game runs with it. These files are not drift (the CLI never wrote them), so `modpack status` does not report them. For each unknown jar, list the candidates, one command each:
 
-- Created after the jar landed in the instance: `find "<instance.path>/config" -type f -newerBm "<instance.path>/<path>"`. When `find` says the file system has no birth time, use `-newer` instead, which also lists files other mods rewrote at launch.
-- Named after the mod: `find "<instance.path>/config" -ipath '*<mod id>*'`.
+- Created after the jar landed in the instance: `find "<instance.path>/config" -type f -newerBB "<instance.path>/<path>"`. When `find` says the file system has no birth time, use `-newer` instead, which also lists files other mods rewrote at launch.
+- Named after the mod: `find "<instance.path>/config" -ipath "<instance.path>/config/*<mod id>*"`. The pattern starts at `config/`, so that a mod id found in the instance's own path does not match every file.
 
 Then drop from these lists:
 

@@ -112,11 +112,24 @@ fn skills_only_use_existing_commands_and_flags() {
 fn skills_keep_no_state_in_shell_variables() {
     for name in SKILLS {
         for code in code_of(&skill_template(name)) {
-            let assigns = code.split_whitespace().next().is_some_and(|word| {
-                word.split_once('=').is_some_and(|(var, _)| {
-                    !var.is_empty() && var.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            // The first word of each command of the line, after `export`.
+            let assigns = code
+                .split(['&', ';', '|', '('])
+                .filter_map(|command| {
+                    let mut words = command.split_whitespace();
+                    let first = words.next()?;
+                    if first == "export" {
+                        words.next()
+                    } else {
+                        Some(first)
+                    }
                 })
-            });
+                .any(|word| {
+                    word.split_once('=').is_some_and(|(var, _)| {
+                        !var.is_empty()
+                            && var.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    })
+                });
             assert!(!assigns, "{name}: shell variable set in `{code}`");
         }
     }

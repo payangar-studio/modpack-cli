@@ -50,9 +50,11 @@ pub fn move_to_mode(doc: &mut DocumentMut, key: &str, mode: &str) -> Result<()> 
 /// Makes `key` a mod of `modes` only. Without the default mode among them, the
 /// default mode removes `key` and each of `modes` adds it; with it, `key`
 /// stays in the default selection and every other mode not in `modes` removes
-/// it. Returns the modes that now remove `key`. Modes other than the default
-/// one must already exist.
+/// it. Where `key` was placed before, in the `add` or `remove` of a mode, is
+/// dropped first. Returns the modes that now remove `key`. Modes other than
+/// the default one must already exist.
 pub fn restrict_to_modes(doc: &mut DocumentMut, key: &str, modes: &[&str]) -> Result<Vec<String>> {
+    remove_key(doc, key);
     if !modes.contains(&DEFAULT_MODE) {
         modes.iter().try_for_each(|m| move_to_mode(doc, key, m))?;
         return Ok(vec![DEFAULT_MODE.to_owned()]);
@@ -296,7 +298,25 @@ mod tests {
         let mut doc = doc(&before);
         let excluded = restrict_to_modes(&mut doc, "jei", &[DEFAULT_MODE, "server"]).unwrap();
         assert_eq!(excluded, ["hardcore"]);
-        assert_eq!(doc.to_string(), format!("{before}remove = [\"jei\"]\n"));
+        // `server` is named: it no longer removes `jei`.
+        let expected = before.replace(
+            "remove = [\"sodium\", \"iris\", \"jei\"]",
+            "remove = [\"sodium\", \"iris\"]",
+        );
+        assert_eq!(doc.to_string(), format!("{expected}remove = [\"jei\"]\n"));
+        // A mod of some modes only, placed again with the default one, leaves
+        // the default `remove` and the `add` of its former modes.
+        let mut doc = self::doc(&before);
+        restrict_to_modes(&mut doc, "hardcore-tweaks", &[DEFAULT_MODE, "hardcore"]).unwrap();
+        let parsed = modes::Modes::parse(&doc.to_string()).unwrap();
+        assert!(parsed.default.remove.is_empty(), "{doc}");
+        assert!(parsed.modes["hardcore"].add.is_empty(), "{doc}");
+        assert!(
+            parsed.modes["server"]
+                .remove
+                .contains(&"hardcore-tweaks".to_owned()),
+            "{doc}"
+        );
         let mut doc = self::doc(&before);
         restrict_to_modes(&mut doc, "newmod", &[DEFAULT_MODE]).unwrap();
         let parsed = modes::Modes::parse(&doc.to_string()).unwrap();

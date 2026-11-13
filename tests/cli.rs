@@ -77,7 +77,10 @@ fn command_help_shows_its_arguments() {
         ),
         (&["setup"], &["--no-launch"]),
         (&["update"], &["--force"]),
-        (&["add"], &["<MOD>", "--version", "--mode"]),
+        (
+            &["add"],
+            &["<MOD>", "--version", "--mode", "--mode default --mode"],
+        ),
         (&["remove"], &["<KEY>"]),
         (&["manifest"], &["--check"]),
         (&["install"], &["--force"]),

@@ -47,6 +47,35 @@ pub fn move_to_mode(doc: &mut DocumentMut, key: &str, mode: &str) -> Result<()> 
     push_value(default, "remove", key)
 }
 
+/// Makes `key` a mod of `modes` only. Without the default mode among them, the
+/// default mode removes `key` and each of `modes` adds it; with it, `key`
+/// stays in the default selection and every other mode not in `modes` removes
+/// it. Where `key` was placed before, in the `add` or `remove` of a mode, is
+/// dropped first. Returns the modes that now remove `key`. Modes other than
+/// the default one must already exist.
+pub fn restrict_to_modes(doc: &mut DocumentMut, key: &str, modes: &[&str]) -> Result<Vec<String>> {
+    remove_key(doc, key);
+    if !modes.contains(&DEFAULT_MODE) {
+        modes.iter().try_for_each(|m| move_to_mode(doc, key, m))?;
+        return Ok(vec![DEFAULT_MODE.to_owned()]);
+    }
+    let Some(all) = doc.get_mut("modes").and_then(Item::as_table_like_mut) else {
+        return Ok(Vec::new());
+    };
+    let mut excluded = Vec::new();
+    for (name, mode) in all.iter_mut() {
+        if modes.contains(&name.get()) {
+            continue;
+        }
+        let mode = mode.as_table_like_mut().ok_or_else(|| {
+            Error::usage(format!("modes.toml: mode `{name}` is not a table"), HINT)
+        })?;
+        push_value(mode, "remove", key)?;
+        excluded.push(name.get().to_owned());
+    }
+    Ok(excluded)
+}
+
 /// Loads `<root>/modes.toml`, applies `edit`, and writes the file back if the
 /// text changed. A missing file is an empty one, written only if `edit`
 /// changes it.
@@ -246,6 +275,64 @@ mod tests {
         let mut doc = doc(&fixture());
         let err = move_to_mode(&mut doc, "jei", "lowend").unwrap_err();
         assert!(err.to_string().contains("no mode `lowend`"));
+    }
+
+    #[test]
+    fn restricting_to_modes_without_the_default_one_moves_the_key() {
+        let mut doc = doc(&fixture());
+        let excluded = restrict_to_modes(&mut doc, "sodium", &["server", "hardcore"]).unwrap();
+        assert_eq!(excluded, [DEFAULT_MODE]);
+        let parsed = modes::Modes::parse(&doc.to_string()).unwrap();
+        assert!(parsed.default.remove.contains(&"sodium".to_owned()));
+        for name in ["server", "hardcore"] {
+            assert!(
+                parsed.modes[name].add.contains(&"sodium".to_owned()),
+                "{doc}"
+            );
+        }
+    }
+
+    #[test]
+    fn restricting_to_modes_with_the_default_one_removes_from_the_others() {
+        let before = fixture();
+        let mut doc = doc(&before);
+        let excluded = restrict_to_modes(&mut doc, "jei", &[DEFAULT_MODE, "server"]).unwrap();
+        assert_eq!(excluded, ["hardcore"]);
+        // `server` is named: it no longer removes `jei`.
+        let expected = before.replace(
+            "remove = [\"sodium\", \"iris\", \"jei\"]",
+            "remove = [\"sodium\", \"iris\"]",
+        );
+        assert_eq!(doc.to_string(), format!("{expected}remove = [\"jei\"]\n"));
+        // A mod of some modes only, placed again with the default one, leaves
+        // the default `remove` and the `add` of its former modes.
+        let mut doc = self::doc(&before);
+        restrict_to_modes(&mut doc, "hardcore-tweaks", &[DEFAULT_MODE, "hardcore"]).unwrap();
+        let parsed = modes::Modes::parse(&doc.to_string()).unwrap();
+        assert!(parsed.default.remove.is_empty(), "{doc}");
+        assert!(parsed.modes["hardcore"].add.is_empty(), "{doc}");
+        assert!(
+            parsed.modes["server"]
+                .remove
+                .contains(&"hardcore-tweaks".to_owned()),
+            "{doc}"
+        );
+        let mut doc = self::doc(&before);
+        restrict_to_modes(&mut doc, "newmod", &[DEFAULT_MODE]).unwrap();
+        let parsed = modes::Modes::parse(&doc.to_string()).unwrap();
+        assert!(!parsed.default.remove.contains(&"newmod".to_owned()));
+        for name in ["server", "hardcore"] {
+            assert!(
+                parsed.modes[name].remove.contains(&"newmod".to_owned()),
+                "{doc}"
+            );
+        }
+        // Every mode named: nothing to write.
+        let mut doc = self::doc(&before);
+        let excluded =
+            restrict_to_modes(&mut doc, "newmod", &[DEFAULT_MODE, "server", "hardcore"]).unwrap();
+        assert!(excluded.is_empty());
+        assert_eq!(doc.to_string(), before);
     }
 
     #[test]

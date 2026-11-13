@@ -42,8 +42,14 @@ There is one level of modes. The default mode is the full pack; every other mode
 
 - `description`: shown by `modpack mode list`.
 - `remove`: keys taken out. The default mode starts from every mod of the manifest; another mode starts from the default mode's selection.
-- `add` (other modes only): keys added to the default mode's selection. A key added must be one the default mode removes: a mod of one mode only is in the manifest, removed from the default mode and added by its mode. `modpack add <mod> --mode <mode>` writes both.
+- `add` (other modes only): keys added to the default mode's selection. A key added must be one the default mode removes: a mod of one mode only is in the manifest, removed from the default mode and added by its mode.
 - `conditions`: the mode's own conditions, see below.
+
+`modpack add <mod> --mode <mode>` puts a new mod in some modes only, and writes these lists for it. `--mode` repeats, and `default` names the default mode:
+
+- Without `--mode`, the mod is in every mode.
+- `--mode server --mode hardcore`: the default mode removes the mod, `server` and `hardcore` add it.
+- `--mode default --mode hardcore`: the mod stays in the default selection, and every other mode not named (here `server`) removes it. This is how a client-only mod leaves a `side = "server"` mode.
 
 A file without `[default]` is a default mode with every mod. The name `default` is reserved: `[modes.default]` is refused. So are a nested mode (`[modes.server.lowend]`), an unknown field, and a key the manifest does not have. `modpack remove <key>` takes the key out of every mode.
 

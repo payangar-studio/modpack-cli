@@ -37,8 +37,9 @@ pub struct AddRequest {
     /// Slug, id or URL of a mod on a platform, or path to a local jar.
     pub mod_ref: String,
     pub version: Option<String>,
-    /// Mode the mod is for, alone; `None` puts it in every mode.
-    pub mode: Option<String>,
+    /// Modes the mod is for, alone, `default` included or not; empty puts it
+    /// in every mode.
+    pub modes: Vec<String>,
     /// Direct URL of a jar no platform knows.
     pub url: Option<String>,
     /// Add the missing required dependencies without asking.
@@ -84,8 +85,10 @@ pub fn add(
     req: &AddRequest,
     out: &mut dyn Write,
 ) -> Result<String> {
-    let mode = req.mode.as_deref().filter(|m| *m != DEFAULT_MODE);
-    if let Some(mode) = mode {
+    let mut modes: Vec<&str> = req.modes.iter().map(String::as_str).collect();
+    modes.sort_unstable();
+    modes.dedup();
+    for mode in modes.iter().filter(|m| **m != DEFAULT_MODE) {
         modes_edit::require_mode(root, mode)?;
     }
     let mut edit = Edit {
@@ -153,17 +156,25 @@ pub fn add(
         }
     }
 
-    if let Some(mode) = mode.filter(|_| !added.is_empty()) {
-        modes_edit::edit(root, |doc| {
-            added
-                .iter()
-                .try_for_each(|k| modes_edit::move_to_mode(doc, k, mode))
+    if !modes.is_empty() && !added.is_empty() {
+        let excluded = modes_edit::edit(root, |doc| {
+            let mut excluded = Vec::new();
+            for k in &added {
+                excluded = modes_edit::restrict_to_modes(doc, k, &modes)?;
+            }
+            Ok(excluded)
         })?;
-        writeln!(
-            out,
-            "mode `{mode}`: {} removed from the default mode and added to `{mode}`",
-            quoted(&added)
-        )?;
+        let keys = quoted(&added);
+        if !modes.contains(&DEFAULT_MODE) {
+            let named: Vec<String> = modes.iter().map(|m| (*m).to_owned()).collect();
+            writeln!(
+                out,
+                "{keys} removed from the default mode and added to {}",
+                quoted(&named)
+            )?;
+        } else if !excluded.is_empty() {
+            writeln!(out, "{keys} removed from {}", quoted(&excluded))?;
+        }
     }
     Ok(key)
 }
@@ -889,7 +900,7 @@ mod tests {
         let root = repo();
         fs::write(root.path().join("modes.toml"), MODES).unwrap();
         let mut req = request("sodium");
-        req.mode = Some("server".into());
+        req.modes = vec!["server".into()];
         let (result, out) = run_add(root.path(), &registry(), &req);
         result.unwrap();
         assert!(out.contains("added to `server`"), "{out}");
@@ -901,11 +912,48 @@ mod tests {
     }
 
     #[test]
+    fn modes_with_the_default_one_remove_the_mod_from_the_others() {
+        let root = repo();
+        let modes = format!("{MODES}\n[modes.lite]\n");
+        fs::write(root.path().join("modes.toml"), &modes).unwrap();
+        let mut req = request("sodium");
+        req.modes = vec!["lite".into(), "default".into(), "lite".into()];
+        let (result, out) = run_add(root.path(), &registry(), &req);
+        result.unwrap();
+        assert!(out.contains("`sodium` removed from `server`\n"), "{out}");
+        assert_eq!(
+            fs::read_to_string(root.path().join("modes.toml")).unwrap(),
+            modes.replace("remove = [\"jei\"]", "remove = [\"jei\", \"sodium\"]")
+        );
+    }
+
+    #[test]
+    fn several_modes_without_the_default_one_each_add_the_mod() {
+        let root = repo();
+        fs::write(
+            root.path().join("modes.toml"),
+            format!("{MODES}\n[modes.lite]\n"),
+        )
+        .unwrap();
+        let mut req = request("sodium");
+        req.modes = vec!["server".into(), "lite".into()];
+        let (result, out) = run_add(root.path(), &registry(), &req);
+        result.unwrap();
+        assert!(
+            out.contains("removed from the default mode and added to `lite`, `server`"),
+            "{out}"
+        );
+        let modes = fs::read_to_string(root.path().join("modes.toml")).unwrap();
+        assert_eq!(modes.matches("add = [\"sodium\"]").count(), 2, "{modes}");
+        assert!(modes.contains("[default]\ndescription = \"Full\"\nremove = [\"sodium\"]\n"));
+    }
+
+    #[test]
     fn unknown_mode_is_refused_before_anything_is_downloaded() {
         let root = repo();
         fs::write(root.path().join("modes.toml"), MODES).unwrap();
         let mut req = request("sodium");
-        req.mode = Some("lowend".into());
+        req.modes = vec!["lowend".into()];
         let err = run_add(root.path(), &registry(), &req).0.unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Usage);
         assert!(!root.path().join("mods/sodium-1.0.0.jar").exists());
@@ -963,7 +1011,7 @@ mod tests {
         fs::write(root.path().join("modes.toml"), MODES).unwrap();
         let mut req = request("sodium");
         req.with_deps = true;
-        req.mode = Some("server".into());
+        req.modes = vec!["server".into()];
         let (result, out) = run_add(root.path(), &with_dependency(), &req);
         result.unwrap();
         let manifest = load(root.path());

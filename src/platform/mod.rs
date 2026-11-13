@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use crate::error::{Error, Result};
 use crate::model::manifest::{Entry, Pack};
 
+pub mod curseforge;
 #[cfg(test)]
 pub mod fake;
 pub mod modrinth;
@@ -231,7 +232,10 @@ impl Registry {
 
     /// The platforms built into the CLI, in the order they are tried.
     pub fn builtin() -> Self {
-        Self::new(vec![Box::new(modrinth::Modrinth::default())])
+        Self::new(vec![
+            Box::new(modrinth::Modrinth::default()),
+            Box::new(curseforge::CurseForge::new()),
+        ])
     }
 
     pub fn all(&self) -> impl Iterator<Item = &dyn Platform> {

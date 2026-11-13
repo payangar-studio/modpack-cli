@@ -396,15 +396,32 @@ fn a_vanished_file_is_reported() {
     assert!(err.to_string().contains("no longer exists"));
 }
 
-#[test]
-fn a_mod_not_on_curseforge_blocks_the_pack() {
-    let cf = CurseForge::with("http://unused.invalid", || None);
+fn refusal(cf: &CurseForge) -> String {
     let mut e = entry(1, 2);
     e.platforms.clear();
     let Eligibility::Blocked { reason } = cf.pack_eligibility(&e).unwrap() else {
         panic!("a mod off CurseForge is not eligible");
     };
+    reason
+}
+
+#[test]
+fn a_mod_not_on_curseforge_blocks_the_pack() {
+    let reason = refusal(&CurseForge::with("http://unused.invalid", || {
+        Some(KEY.into())
+    }));
+    assert!(reason.starts_with("not hosted on CurseForge"), "{reason}");
     assert!(reason.contains("approved list"));
+}
+
+#[test]
+fn without_a_key_missing_ids_blame_the_key_not_the_hosting() {
+    let reason = refusal(&CurseForge::with("http://unused.invalid", || None));
+    assert!(!reason.contains("not hosted"), "{reason}");
+    assert!(reason.contains("no CurseForge Core API key"), "{reason}");
+    assert!(reason.contains("`modpack auth`"), "{reason}");
+    assert!(reason.contains("MODPACK_CURSEFORGE_API_KEY"), "{reason}");
+    assert!(reason.contains("`modpack manifest`"), "{reason}");
 }
 
 #[test]

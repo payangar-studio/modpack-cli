@@ -1,5 +1,6 @@
-//! `modpack manifest`: adds the new jars of mods/ to the manifest and
-//! rebuilds the entries whose jar changed. A missing jar keeps its entry.
+//! `modpack manifest`: adds the new jars of mods/ to the manifest, rebuilds
+//! the entries whose jar changed and links entries to the platforms that did
+//! not know them yet. A missing jar keeps its entry.
 //! Then checks `modes.toml` against the manifest, so that the `pre-commit`
 //! hook, which runs this command, stops a commit whose modes are broken.
 
@@ -77,6 +78,7 @@ fn update_or_check(args: Args, root: &Path) -> Result<()> {
     for (label, keys) in [
         ("added", &changes.added),
         ("rebuilt, jar changed", &changes.rebuilt),
+        ("linked to more platforms", &changes.linked),
     ] {
         if !keys.is_empty() {
             writeln!(out, "{label}: {}", keys.join(", "))?;

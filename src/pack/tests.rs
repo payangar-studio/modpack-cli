@@ -8,6 +8,18 @@ use super::*;
 use crate::error::ErrorKind;
 use crate::platform::fake::FakePlatform;
 
+/// The built-in platforms, CurseForge with a key: packing never calls its
+/// API, and with no key it blames the key for missing ids.
+fn registry() -> Registry {
+    Registry::new(vec![
+        Box::new(crate::platform::modrinth::Modrinth::default()),
+        Box::new(crate::platform::curseforge::CurseForge::with(
+            "http://unused.invalid",
+            || Some("key".into()),
+        )),
+    ])
+}
+
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/repo")
 }
@@ -107,7 +119,7 @@ fn overrides(files: &BTreeMap<String, String>) -> BTreeMap<&str, &str> {
 fn builds_one_artifact_per_mode_and_platform() {
     let repo = repo(everywhere);
     let out = repo.path().join("dist");
-    let report = build(repo.path(), &Registry::builtin(), &request(&out)).unwrap();
+    let report = build(repo.path(), &registry(), &request(&out)).unwrap();
 
     assert_eq!(report.version, "1.2.3");
     assert_eq!(report.blocked, Vec::new());
@@ -135,7 +147,7 @@ fn builds_one_artifact_per_mode_and_platform() {
 fn artifacts_hold_the_mode_mods_and_merged_overrides() {
     let repo = repo(everywhere);
     let out = repo.path().join("dist");
-    build(repo.path(), &Registry::builtin(), &request(&out)).unwrap();
+    build(repo.path(), &registry(), &request(&out)).unwrap();
 
     // The server mode removes sodium, iris and jei, and hardcore-tweaks is
     // removed from the default mode.
@@ -191,7 +203,7 @@ fn an_ineligible_mod_blocks_its_platform_only() {
     // hardcore-tweaks is hosted on neither platform.
     let repo = repo(|_| {});
     let out = repo.path().join("dist");
-    let report = build(repo.path(), &Registry::builtin(), &request(&out)).unwrap();
+    let report = build(repo.path(), &registry(), &request(&out)).unwrap();
 
     let built: Vec<(&str, &str)> = report
         .artifacts
@@ -255,7 +267,7 @@ fn a_mod_hosted_elsewhere_is_packed_where_its_platform_accepts_it() {
     let out = repo.path().join("dist");
     let report = build(
         repo.path(),
-        &Registry::builtin(),
+        &registry(),
         &Request {
             mode: Some("hardcore"),
             ..request(&out)
@@ -293,7 +305,7 @@ fn mode_and_platform_narrow_the_build() {
     let out = repo.path().join("dist");
     let report = build(
         repo.path(),
-        &Registry::builtin(),
+        &registry(),
         &Request {
             mode: Some("server"),
             platform: Some("curseforge"),
@@ -316,7 +328,7 @@ fn mode_and_platform_narrow_the_build() {
 fn unknown_mode_or_platform_is_a_usage_error() {
     let repo = repo(everywhere);
     let out = repo.path().join("dist");
-    let registry = Registry::builtin();
+    let registry = registry();
     let unknown_mode = Request {
         mode: Some("lowend"),
         ..request(&out)

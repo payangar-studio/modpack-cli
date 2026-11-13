@@ -22,7 +22,8 @@ With `--json`, the report is one JSON object on stdout. This format is the contr
 | `instance.variant` | Variant loaded last, or `null` before the first `modpack variant load`. |
 | `instance.drift` | Files the CLI wrote into the instance that changed or were deleted since, relative to the instance, with `/` separators. |
 | `instance.disabled` | Jars of `drift` that the Modrinth App disabled: renamed `<jar>.disabled`, content unchanged. `modpack variant load <variant> --force` enables them again. |
-| `instance.unknown_jars` | Jars of the instance's `mods/` whose sha1 and sha512 match no manifest entry, whatever their file name, with their hashes so they can be looked up on the platforms. |
+| `instance.unknown_jars` | Jars of the instance's `mods/` whose sha1 and sha512 match no manifest entry, whatever their file name, with their hashes so they can be looked up on the platforms. The jars of `outdated_jars` are not listed. |
+| `instance.outdated_jars` | Jars the CLI wrote into the instance's `mods/` at an earlier load, unchanged since, that no manifest entry has any more: the mod was removed or updated, or a local mod was rebuilt. `modpack variant load` replaces them. `local_mod` is the key of the local mod whose jar has the same file name, the jar then being its previous build, or `null`. |
 | `missing_jars` | Manifest entries whose jar is absent from `mods/` of the repository, or replaced by an older jar `modpack install` downloaded and nobody changed since: `modpack install` downloads them. A local mod listed here lost its jar from `mods-local/`: git restores it. |
 | `manifest.stale` | `true` when `new_jars` or `changed` is not empty: `modpack manifest` regenerates the manifest. |
 | `manifest.new_jars` | Jars of `mods/` or `mods-local/` of the repository that no entry lists, except the ones `modpack install` downloaded and nobody changed since: those are removed by the next `modpack install`, never added back. |
@@ -63,7 +64,7 @@ JSON Schema (draft 2020-12). It describes this version exactly. A later version 
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["path", "variant", "drift", "disabled", "unknown_jars"],
+          "required": ["path", "variant", "drift", "disabled", "unknown_jars", "outdated_jars"],
           "properties": {
             "path": { "type": "string" },
             "variant": { "type": ["string", "null"] },
@@ -79,6 +80,18 @@ JSON Schema (draft 2020-12). It describes this version exactly. A later version 
                   "path": { "type": "string" },
                   "sha1": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
                   "sha512": { "type": "string", "pattern": "^[0-9a-f]{128}$" }
+                }
+              }
+            },
+            "outdated_jars": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "local_mod"],
+                "properties": {
+                  "path": { "type": "string" },
+                  "local_mod": { "type": ["string", "null"] }
                 }
               }
             }
@@ -127,7 +140,7 @@ JSON Schema (draft 2020-12). It describes this version exactly. A later version 
 
 ## Example
 
-An instance where a config file was changed in game and a mod was tried from the app, in a repository where `iris` is not downloaded yet and the local mod `custom-tweaks` is not approved.
+An instance where a config file was changed in game, a mod was tried from the app, and the previous build of the local mod `custom-tweaks` waits for the next load, in a repository where `iris` is not downloaded yet and `custom-tweaks` is not approved.
 
 ```json
 {
@@ -143,7 +156,8 @@ An instance where a config file was changed in game and a mod was tried from the
         "sha1": "a9993e364706816aba3e25717850c26c9cd0d89d",
         "sha512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
       }
-    ]
+    ],
+    "outdated_jars": [{ "path": "mods/custom-tweaks-0.3.jar", "local_mod": "custom-tweaks" }]
   },
   "missing_jars": [{ "key": "iris", "path": "mods/iris-neoforge-1.8.1.jar" }],
   "manifest": { "stale": false, "new_jars": [], "changed": [] },

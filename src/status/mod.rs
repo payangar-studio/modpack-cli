@@ -60,8 +60,21 @@ pub struct Instance {
     pub drift: Vec<String>,
     /// Jars of `drift` the Modrinth App disabled (renamed `<jar>.disabled`).
     pub disabled: Vec<String>,
-    /// Jars of the instance's `mods/` whose hashes no manifest entry has.
+    /// Jars of the instance's `mods/` whose hashes no manifest entry has,
+    /// but those of `outdated_jars`.
     pub unknown_jars: Vec<UnknownJar>,
+    /// Jars the CLI wrote at an earlier load, unchanged since, that no
+    /// manifest entry has any more: `modpack variant load` replaces them.
+    pub outdated_jars: Vec<OutdatedJar>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OutdatedJar {
+    /// Relative to the instance, such as `mods/foo.jar`.
+    pub path: String,
+    /// The local mod whose jar has this file name: the jar is its previous
+    /// build.
+    pub local_mod: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -149,8 +162,24 @@ fn instance(dir: &Path, manifest: &Manifest) -> Result<Instance> {
         }
     }
     let mut unknown_jars = Vec::new();
+    let mut outdated_jars = Vec::new();
     for (relative, hashes) in jars_in(&dir.join(MODS_DIR))? {
-        if !manifest.mods.iter().any(|e| hashes.matches(&e.hashes)) {
+        if manifest.mods.iter().any(|e| hashes.matches(&e.hashes)) {
+            continue;
+        }
+        // As `modpack variant load` sorts it: a jar it wrote, unchanged
+        // since, is its own to replace, never the user's.
+        if state.files.get(&relative) == Some(&hashes.sha256) {
+            let local_mod = manifest
+                .mods
+                .iter()
+                .find(|e| e.is_local() && e.instance_path() == relative)
+                .map(|e| e.key.clone());
+            outdated_jars.push(OutdatedJar {
+                path: relative,
+                local_mod,
+            });
+        } else {
             unknown_jars.push(UnknownJar {
                 path: relative,
                 sha1: hashes.sha1,
@@ -164,6 +193,7 @@ fn instance(dir: &Path, manifest: &Manifest) -> Result<Instance> {
         drift,
         disabled,
         unknown_jars,
+        outdated_jars,
     })
 }
 
@@ -217,15 +247,31 @@ impl Status {
                         writeln!(out, "  - {} (sha1 {})", jar.path, jar.sha1)?;
                     }
                 }
+                let outdated: Vec<String> = i
+                    .outdated_jars
+                    .iter()
+                    .map(|jar| match &jar.local_mod {
+                        Some(key) => {
+                            format!("{}, a previous build of the local mod `{key}`", jar.path)
+                        }
+                        None => jar.path.clone(),
+                    })
+                    .collect();
+                list(
+                    out,
+                    &format!(
+                        "jars an earlier load left in the instance, unknown to the manifest now; `modpack variant load {}` replaces them",
+                        i.variant.as_deref().unwrap_or("<variant>")
+                    ),
+                    &outdated,
+                )?;
             }
         }
 
         // Git holds the jars of mods-local/: `modpack install` cannot restore
         // them.
-        let (local_missing, missing): (Vec<&Jar>, Vec<&Jar>) = self
-            .missing_jars
-            .iter()
-            .partition(|j| j.path.starts_with(&format!("{LOCAL_DIR}/")));
+        let (local_missing, missing): (Vec<&Jar>, Vec<&Jar>) =
+            self.missing_jars.iter().partition(|j| is_local(&j.path));
         let missing: Vec<String> = missing.into_iter().map(Jar::describe).collect();
         list(
             out,
@@ -249,30 +295,54 @@ impl Status {
             &local_missing,
         )?;
 
+        // The jars of mods-local/ go to the local mods section.
         let m = &self.manifest;
+        let (local_new, new_jars): (Vec<&String>, Vec<&String>) =
+            m.new_jars.iter().partition(|p| is_local(p));
+        let (local_changed, changed): (Vec<&Jar>, Vec<&Jar>) =
+            m.changed.iter().partition(|j| is_local(&j.path));
         if m.stale {
             writeln!(out, "manifest: stale; run `modpack manifest`")?;
-            list(out, "jars of mods/ not in the manifest", &m.new_jars)?;
-            let changed: Vec<String> = m.changed.iter().map(Jar::describe).collect();
+            let new_jars: Vec<String> = new_jars.into_iter().cloned().collect();
+            list(out, "jars of mods/ not in the manifest", &new_jars)?;
+            let changed: Vec<String> = changed.into_iter().map(Jar::describe).collect();
             list(out, "jars of mods/ changed since the manifest", &changed)?;
         } else {
-            writeln!(out, "manifest: up to date with mods/")?;
+            writeln!(out, "manifest: up to date with mods/ and mods-local/")?;
         }
 
-        let local: Vec<String> = self
+        let mut local: Vec<String> = self
             .local_mods
             .iter()
-            .map(|m| match m.approved {
-                true => format!("{} ({}), approved", m.key, m.path),
-                false => format!(
-                    "{} ({}), not approved: review it, then run `modpack approve {}`",
-                    m.key, m.path, m.key
-                ),
+            .map(|m| {
+                if local_changed.iter().any(|j| j.key == m.key) {
+                    format!(
+                        "{} ({}), changed since the manifest: run `modpack manifest`, review it, then run `modpack approve {}`",
+                        m.key, m.path, m.key
+                    )
+                } else if m.approved {
+                    format!("{} ({}), approved", m.key, m.path)
+                } else {
+                    format!(
+                        "{} ({}), not approved: review it, then run `modpack approve {}`",
+                        m.key, m.path, m.key
+                    )
+                }
             })
             .collect();
+        local.extend(
+            local_new
+                .into_iter()
+                .map(|p| format!("{p}, not in the manifest: run `modpack manifest`")),
+        );
         list(out, "local mods, tracked by git in mods-local/", &local)?;
         Ok(())
     }
+}
+
+/// Whether a path of the repository is under `mods-local/`.
+fn is_local(path: &str) -> bool {
+    path.starts_with(&format!("{LOCAL_DIR}/"))
 }
 
 impl Jar {
@@ -577,6 +647,97 @@ mod tests {
         // A jar dropped in mods-local/ makes the manifest stale.
         setup.write_repo("mods-local/dropped.jar", b"new");
         assert_eq!(setup.status().manifest.new_jars, ["mods-local/dropped.jar"]);
+    }
+
+    #[test]
+    fn local_jars_are_reported_with_the_local_mods_not_with_mods() {
+        let setup = Setup::new();
+        let path = setup.repo.path().join(manifest::FILE_NAME);
+        let mut m = Manifest::load(&path).unwrap();
+        let mut custom = entry("custom", b"custom");
+        custom.path = "mods-local/custom.jar".into();
+        custom.source = Some(crate::model::manifest::Source::Local);
+        m.upsert(custom);
+        m.save(&path).unwrap();
+        setup.write_repo("mods-local/custom.jar", b"rebuilt");
+        setup.write_repo("mods-local/dropped.jar", b"new");
+        setup.write_repo("mods/added-by-hand.jar", b"x");
+
+        let status = setup.status();
+        assert_eq!(
+            status.manifest.new_jars,
+            ["mods-local/dropped.jar", "mods/added-by-hand.jar"]
+        );
+        assert_eq!(status.manifest.changed[0].key, "custom");
+        let out = text(&status);
+        assert!(
+            out.contains("jars of mods/ not in the manifest (1):\n  - mods/added-by-hand.jar\n"),
+            "{out}"
+        );
+        assert!(!out.contains("jars of mods/ changed"), "{out}");
+        assert!(
+            out.contains(
+                "local mods, tracked by git in mods-local/ (2):\n  \
+                 - custom (mods-local/custom.jar), changed since the manifest: run `modpack manifest`, review it, then run `modpack approve custom`\n  \
+                 - mods-local/dropped.jar, not in the manifest: run `modpack manifest`\n"
+            ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn an_earlier_build_of_a_local_mod_left_in_the_instance_is_named() {
+        let setup = Setup::new();
+        // The CLI loaded build 1 of `custom`; build 2 is in the manifest now.
+        setup.write_instance("mods/custom.jar", b"build 1");
+        let mut state = InstanceState::load(&setup.instance()).unwrap();
+        state.record(&setup.instance(), "mods/custom.jar").unwrap();
+        // And an older jar of a mod the manifest dropped since.
+        setup.write_instance("mods/old-1.0.jar", b"old");
+        state.record(&setup.instance(), "mods/old-1.0.jar").unwrap();
+        state.save(&setup.instance()).unwrap();
+        let path = setup.repo.path().join(manifest::FILE_NAME);
+        let mut m = Manifest::load(&path).unwrap();
+        let mut custom = entry("custom", b"build 2");
+        custom.path = "mods-local/custom.jar".into();
+        custom.source = Some(crate::model::manifest::Source::Local);
+        m.upsert(custom);
+        m.save(&path).unwrap();
+        // A jar tried from the app stays unknown.
+        setup.write_instance("mods/tried.jar", b"tried");
+
+        let status = setup.status();
+        let instance = status.instance.as_ref().unwrap();
+        assert_eq!(
+            instance.outdated_jars,
+            [
+                OutdatedJar {
+                    path: "mods/custom.jar".into(),
+                    local_mod: Some("custom".into())
+                },
+                OutdatedJar {
+                    path: "mods/old-1.0.jar".into(),
+                    local_mod: None
+                }
+            ]
+        );
+        let unknown: Vec<&str> = instance
+            .unknown_jars
+            .iter()
+            .map(|j| j.path.as_str())
+            .collect();
+        assert_eq!(unknown, ["mods/tried.jar"]);
+        let out = text(&status);
+        assert!(
+            out.contains(
+                "jars an earlier load left in the instance, unknown to the manifest now; `modpack variant load default` replaces them (2):\n  \
+                 - mods/custom.jar, a previous build of the local mod `custom`\n  \
+                 - mods/old-1.0.jar\n"
+            ),
+            "{out}"
+        );
+        let (schema, _) = documented();
+        assert_valid(&schema, &serde_json::to_value(&status).unwrap());
     }
 
     #[test]

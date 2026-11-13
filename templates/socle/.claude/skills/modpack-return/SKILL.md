@@ -36,6 +36,7 @@ One JSON object on stdout (exit code 0 whatever it reports). What matters here:
 - `instance.unknown_jars`: jars of the instance's `mods/` that no manifest entry has, by hash, with `path` relative to the instance, `sha1` and `sha512`.
 - `instance.drift`: files the CLI wrote into the instance that were changed or deleted since, relative to the instance.
 - `instance.disabled`: the jars of `drift` the user disabled in the Modrinth App (renamed `<jar>.disabled`).
+- `instance.outdated_jars`: jars an earlier load left that the manifest no longer has, such as the previous build of a local mod (`local_mod`). Nothing to bring back: mention them, `modpack variant load <variant>` replaces them.
 - `manifest.stale`, `missing_jars`: state of the repository itself. Mention them, they are not this skill's job (`modpack manifest`, `modpack install`).
 
 When `unknown_jars` and `drift` are both empty, say that the instance holds nothing to bring back, and stop.

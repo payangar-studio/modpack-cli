@@ -179,8 +179,9 @@ pub fn add(
     Ok(key)
 }
 
-/// Removes a mod: its jar, its entry, and its key from every variant.
-pub fn remove(root: &Path, key: &str, out: &mut dyn Write) -> Result<()> {
+/// Removes a mod: its jar, its entry, and its key from every variant. A local
+/// mod whose jar git does not hold committed is refused, unless `force`.
+pub fn remove(root: &Path, key: &str, force: bool, out: &mut dyn Write) -> Result<()> {
     let path = root.join(manifest::FILE_NAME);
     let mut manifest = Manifest::load(&path)?;
     let entry = manifest.get(key).ok_or_else(|| {
@@ -189,6 +190,19 @@ pub fn remove(root: &Path, key: &str, out: &mut dyn Write) -> Result<()> {
             format!("use a key listed in {}", manifest::FILE_NAME),
         )
     })?;
+    if entry.is_local() && !force && jar_path(root, entry)?.is_file() && !jar_committed(root, entry)
+    {
+        return Err(Error::blocked(
+            format!(
+                "removing the local mod `{key}` would delete {}, which is not committed in git",
+                entry.path
+            ),
+            format!(
+                "commit {} first, or rerun with --force to delete it anyway",
+                entry.path
+            ),
+        ));
+    }
     if entry.is_local() {
         remove_jar(root, entry)?;
     } else if let Ok(jar) = jar_path(root, entry)
@@ -1455,9 +1469,37 @@ mod tests {
     #[test]
     fn removing_a_local_mod_takes_its_jar_out_of_git() {
         let root = with_local_sodium();
-        remove(root.path(), "sodium", &mut Vec::new()).unwrap();
+        remove(root.path(), "sodium", false, &mut Vec::new()).unwrap();
         assert!(!root.path().join("mods-local/sodium-dev.jar").exists());
         assert_eq!(git(root.path(), &["ls-files", "mods-local"]), "");
+        assert!(load(root.path()).mods.is_empty());
+    }
+
+    #[test]
+    fn a_local_jar_not_committed_is_removed_only_with_force() {
+        let root = with_local_sodium();
+        let jar = root.path().join("mods-local/sodium-dev.jar");
+        fs::write(&jar, b"unsaved work").unwrap();
+        let before = load(root.path());
+        let variants = fs::read_to_string(root.path().join("variants.toml")).unwrap();
+
+        let err = remove(root.path(), "sodium", false, &mut Vec::new()).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Blocked);
+        assert!(
+            err.to_string()
+                .contains("would delete mods-local/sodium-dev.jar"),
+            "{err}"
+        );
+        assert!(err.hint().contains("--force"), "{}", err.hint());
+        assert_eq!(fs::read(&jar).unwrap(), b"unsaved work");
+        assert_eq!(load(root.path()), before);
+        assert_eq!(
+            fs::read_to_string(root.path().join("variants.toml")).unwrap(),
+            variants
+        );
+
+        remove(root.path(), "sodium", true, &mut Vec::new()).unwrap();
+        assert!(!jar.exists());
         assert!(load(root.path()).mods.is_empty());
     }
 
@@ -1474,7 +1516,7 @@ mod tests {
             .unwrap();
 
         let mut out = Vec::new();
-        remove(root.path(), "sodium", &mut out).unwrap();
+        remove(root.path(), "sodium", false, &mut out).unwrap();
         let out = String::from_utf8(out).unwrap();
         assert!(out.contains("from the variants that listed it"), "{out}");
         assert!(!root.path().join("mods/sodium-1.0.0.jar").exists());
@@ -1489,7 +1531,7 @@ mod tests {
         );
         assert!(crate::ops::manifest::check(root.path()).unwrap().is_empty());
 
-        let err = remove(root.path(), "sodium", &mut Vec::new()).unwrap_err();
+        let err = remove(root.path(), "sodium", false, &mut Vec::new()).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Usage);
     }
 }

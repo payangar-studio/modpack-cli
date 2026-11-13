@@ -6,7 +6,6 @@
 //! is rebuilt by `modpack manifest` without it. The publish workflow refuses
 //! to publish while a local mod is not approved.
 
-use std::fmt::Write as _;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -135,10 +134,6 @@ pub fn check_approved(root: &Path, out: &mut dyn Write) -> Result<()> {
         }
         return Ok(());
     }
-    let mut what = format!(
-        "{} local mod(s) not approved for publication:",
-        pending.len()
-    );
     for m in &pending {
         // Not approved because the jar is absent, as in a checkout where it
         // was never committed: approving would not help.
@@ -156,11 +151,14 @@ pub fn check_approved(root: &Path, out: &mut dyn Write) -> Result<()> {
         } else {
             writeln!(out, "{}", m.todo())?;
         }
-        let _ = write!(what, "\n  - {} ({})", m.key, m.path);
     }
+    // The lines above name each mod: the error only sums them up.
     Err(Error::blocked(
-        what,
-        "review each jar, then run `modpack approve <key>` and commit mods.lock.toml",
+        format!(
+            "{} local mod(s) not approved for publication",
+            pending.len()
+        ),
+        "each line above says what to do about its mod",
     ))
 }
 
@@ -308,6 +306,13 @@ mod tests {
         let out = String::from_utf8(out).unwrap();
         assert!(out.contains("`custom` (mods-local/custom.jar)"), "{out}");
         assert!(out.contains("`modpack approve custom`"), "{out}");
+        // Said once: the error does not name the mods again.
+        let err = err.to_string();
+        assert!(
+            err.starts_with("error: 1 local mod(s) not approved for publication\n"),
+            "{err}"
+        );
+        assert!(!err.contains("custom"), "{err}");
 
         approve_out(root.path(), "custom").unwrap();
         let mut out = Vec::new();

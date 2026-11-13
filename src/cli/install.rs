@@ -1,19 +1,21 @@
 //! `modpack install`: downloads the missing jars into mods/, then reloads the
 //! mode loaded in the pack's instance.
 
+use std::fs;
 use std::io::Write;
 use std::path::Path;
 
 use crate::context::Context;
-use crate::error::{Error, Result};
+use crate::error::{Context as _, Error, Result};
 use crate::launcher::running::{GameDetector, Processes};
 use crate::mode::{self, LoadContext};
+use crate::model::installed::Installed;
 use crate::model::instance::{InstanceState, Instances};
 use crate::model::manifest::{self, Entry, Manifest};
 use crate::model::socle::SocleConfig;
 use crate::platform::Registry;
 use crate::store::download::{Failure, Http, Sources, download_all};
-use crate::store::inventory::inventory;
+use crate::store::inventory::{Inventory, inventory};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -60,6 +62,7 @@ pub(crate) fn install(
     }
     let manifest = Manifest::load(&manifest_path)?;
     let inv = inventory(root, &manifest)?;
+    remove_stale(root, &inv)?;
 
     let mut wanted: Vec<&Entry> = entries(&manifest, &inv.missing);
     if force {
@@ -67,7 +70,7 @@ pub(crate) fn install(
     }
     let mut downloaded = 0;
     let mut failures = Vec::new();
-    for result in download_all(root, &wanted, sources) {
+    for result in download_all(root, &wanted, sources)? {
         match result {
             Ok(()) => downloaded += 1,
             Err(failure) => failures.push(failure),
@@ -82,6 +85,13 @@ pub(crate) fn install(
     )?;
     for failure in &failures {
         write_failure(out, failure)?;
+    }
+    if !inv.stale.is_empty() {
+        writeln!(
+            out,
+            "removed, no longer in the manifest: {}",
+            inv.stale.join(", ")
+        )?;
     }
     if force && !inv.mismatched.is_empty() {
         writeln!(
@@ -127,6 +137,25 @@ pub(crate) fn install(
         sources,
     };
     reload(&ctx, out)
+}
+
+/// Removes from `mods/` the jars the CLI downloaded that the manifest no
+/// longer lists, and forgets the recorded jars that are gone or were changed
+/// since: those are the user's now.
+fn remove_stale(root: &Path, inv: &Inventory) -> Result<()> {
+    for rel in &inv.stale {
+        let path = root.join(rel);
+        fs::remove_file(&path).context(format!("removing {}", path.display()))?;
+    }
+    let mut installed = Installed::load(root)?;
+    let before = installed.jars.len();
+    installed.jars.retain(|rel, sha1| {
+        !inv.stale.contains(rel) && inv.jars.get(rel).is_some_and(|h| &h.sha1 == sha1)
+    });
+    if installed.jars.len() != before {
+        installed.save(root)?;
+    }
+    Ok(())
 }
 
 fn entries<'a>(manifest: &'a Manifest, keys: &[String]) -> Vec<&'a Entry> {
@@ -176,7 +205,6 @@ mod tests {
     use crate::error::ErrorKind;
     use crate::model::socle::InitValues;
     use crate::store::download::tests::{MapFetch, NoFetch, entry, manifest};
-    use std::fs;
 
     /// Minecraft never runs.
     struct NoGame;
@@ -312,6 +340,64 @@ mod tests {
         assert!(out.contains("jars: 1 present, 1 downloaded"), "{out}");
         assert!(out.contains("replaced, their hash differed from the manifest: iris"));
         assert_eq!(fs::read(repo.path("mods/iris-1.0.0.jar")).unwrap(), b"iris");
+    }
+
+    /// Rewrites the manifest with `iris` dropped and `jei` updated under the
+    /// same file name, as a pull from another machine does.
+    fn pull_an_update(repo: &Repo) -> MapFetch {
+        let mut jei = entry("jei", b"jei2");
+        jei.downloads = vec!["https://cdn.invalid/jei2.jar".into()];
+        manifest(vec![jei])
+            .save(&repo.path(manifest::FILE_NAME))
+            .unwrap();
+        MapFetch::default().with("https://cdn.invalid/jei2.jar", b"jei2")
+    }
+
+    #[test]
+    fn jars_it_placed_leave_with_the_manifest_and_others_stay() {
+        let repo = Repo::new();
+        repo.install(false).0.unwrap();
+        fs::write(repo.path("mods/tried.jar"), b"x").unwrap();
+        let fetch = pull_an_update(&repo);
+
+        let (result, out) = repo.install_with(&fetch, false);
+        result.unwrap();
+        assert!(
+            out.contains("jars: 0 present, 1 downloaded, 0 failed"),
+            "{out}"
+        );
+        assert!(
+            out.contains("removed, no longer in the manifest: mods/iris-1.0.0.jar"),
+            "{out}"
+        );
+        assert!(out.contains("left as is: mods/tried.jar"), "{out}");
+        assert!(!repo.path("mods/iris-1.0.0.jar").exists());
+        assert_eq!(fs::read(repo.path("mods/jei-1.0.0.jar")).unwrap(), b"jei2");
+        assert_eq!(fs::read(repo.path("mods/tried.jar")).unwrap(), b"x");
+        let installed = Installed::load(repo.root.path()).unwrap();
+        assert_eq!(
+            installed.jars.keys().collect::<Vec<_>>(),
+            ["mods/jei-1.0.0.jar"]
+        );
+    }
+
+    #[test]
+    fn a_jar_it_placed_then_changed_by_hand_is_the_users() {
+        let repo = Repo::new();
+        repo.install(false).0.unwrap();
+        fs::write(repo.path("mods/iris-1.0.0.jar"), b"patched").unwrap();
+        fs::write(repo.path("mods/jei-1.0.0.jar"), b"patched").unwrap();
+        let fetch = pull_an_update(&repo);
+
+        let (result, out) = repo.install_with(&fetch, false);
+        assert_eq!(result.unwrap_err().kind(), ErrorKind::Blocked);
+        assert!(out.contains("not replaced: jei"), "{out}");
+        assert!(out.contains("left as is: mods/iris-1.0.0.jar"), "{out}");
+        assert_eq!(
+            fs::read(repo.path("mods/iris-1.0.0.jar")).unwrap(),
+            b"patched"
+        );
+        assert!(Installed::load(repo.root.path()).unwrap().jars.is_empty());
     }
 
     #[test]

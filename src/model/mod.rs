@@ -1,6 +1,7 @@
 //! Formats of the repository and of the machine: the types every command
 //! reads and writes, and nothing that talks to the network.
 
+pub mod installed;
 pub mod instance;
 pub mod manifest;
 pub mod modes;

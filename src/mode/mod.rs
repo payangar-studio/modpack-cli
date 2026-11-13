@@ -258,7 +258,7 @@ fn fill_stock(
     }
     let missing = in_mode(&inv.missing);
     let entries: Vec<&Entry> = missing.iter().filter_map(|k| manifest.get(k)).collect();
-    let failed: Vec<String> = download_all(root, &entries, sources)
+    let failed: Vec<String> = download_all(root, &entries, sources)?
         .into_iter()
         .filter_map(|r| r.err().map(|f| f.key))
         .collect();

@@ -8,33 +8,71 @@ use std::path::Path;
 use super::MODS_DIR;
 use super::hash::{JarHashes, hash_file};
 use crate::error::{Context, Result};
+use crate::model::installed::Installed;
 use crate::model::manifest::Manifest;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Inventory {
     /// Keys of the entries whose jar is there with the manifest's hashes.
     pub present: Vec<String>,
-    /// Keys of the entries whose jar is absent.
+    /// Keys of the entries whose jar is absent, or replaced by an older jar
+    /// the CLI downloaded and nobody changed since.
     pub missing: Vec<String>,
     /// Keys of the entries whose jar is there with other hashes.
     pub mismatched: Vec<String>,
     /// Jars of `mods/` no entry lists, as `mods/<name>`.
     pub unknown: Vec<String>,
+    /// Jars the CLI downloaded that no entry lists any more, unchanged since,
+    /// as `mods/<name>`: stale copies, never the user's.
+    pub stale: Vec<String>,
     /// Every jar found, as `mods/<name>`, with its hashes.
     pub jars: BTreeMap<String, JarHashes>,
 }
 
 /// Hashes every jar of `<root>/mods/` and sorts the manifest's entries by
-/// what was found. A missing `mods/` is an empty stock.
+/// what was found, telling the jars the CLI downloaded (see
+/// [`Installed`]) from the user's. A missing `mods/` is an empty stock.
 pub fn inventory(root: &Path, manifest: &Manifest) -> Result<Inventory> {
-    let dir = root.join(MODS_DIR);
-    let mut jars = BTreeMap::new();
-    let listing = match fs::read_dir(&dir) {
-        Ok(listing) => Some(listing),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+    let jars = jars_in(&root.join(MODS_DIR))?;
+    let installed = Installed::load(root)?;
+    let placed = |path: &str, found: &JarHashes| installed.placed(path, &found.sha1);
+
+    let mut inv = Inventory::default();
+    for entry in &manifest.mods {
+        let list = match jars.get(&entry.path) {
+            None => &mut inv.missing,
+            Some(found) if found.matches(&entry.hashes) => &mut inv.present,
+            Some(found) if placed(&entry.path, found) => &mut inv.missing,
+            Some(_) => &mut inv.mismatched,
+        };
+        list.push(entry.key.clone());
+    }
+    let listed: BTreeSet<&str> = manifest.mods.iter().map(|e| e.path.as_str()).collect();
+    for (path, found) in &jars {
+        if listed.contains(path.as_str()) {
+            continue;
+        }
+        let list = if placed(path, found) {
+            &mut inv.stale
+        } else {
+            &mut inv.unknown
+        };
+        list.push(path.clone());
+    }
+    inv.jars = jars;
+    Ok(inv)
+}
+
+/// Every `.jar` file directly under `dir`, as `mods/<name>`, with its hashes.
+/// A missing directory holds none.
+pub fn jars_in(dir: &Path) -> Result<BTreeMap<String, JarHashes>> {
+    let listing = match fs::read_dir(dir) {
+        Ok(listing) => listing,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
         Err(e) => return Err(e).context(format!("reading {}", dir.display())),
     };
-    for item in listing.into_iter().flatten() {
+    let mut jars = BTreeMap::new();
+    for item in listing {
         let item = item.context(format!("reading {}", dir.display()))?;
         let name = item.file_name().to_string_lossy().into_owned();
         if !name.to_ascii_lowercase().ends_with(".jar") || !item.path().is_file() {
@@ -44,24 +82,7 @@ pub fn inventory(root: &Path, manifest: &Manifest) -> Result<Inventory> {
             hash_file(&item.path()).context(format!("reading {}", item.path().display()))?;
         jars.insert(format!("{MODS_DIR}/{name}"), hashes);
     }
-
-    let mut inv = Inventory::default();
-    for entry in &manifest.mods {
-        let list = match jars.get(&entry.path) {
-            None => &mut inv.missing,
-            Some(found) if found.matches(&entry.hashes) => &mut inv.present,
-            Some(_) => &mut inv.mismatched,
-        };
-        list.push(entry.key.clone());
-    }
-    let listed: BTreeSet<&str> = manifest.mods.iter().map(|e| e.path.as_str()).collect();
-    inv.unknown = jars
-        .keys()
-        .filter(|path| !listed.contains(path.as_str()))
-        .cloned()
-        .collect();
-    inv.jars = jars;
-    Ok(inv)
+    Ok(jars)
 }
 
 #[cfg(test)]

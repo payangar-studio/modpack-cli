@@ -27,8 +27,8 @@ The Modrinth App must be installed for `modpack setup` to create the pack's inst
 | `modpack update [--force]` | Brings the repository's socle to this CLI's version. Stops on socle files edited by hand, unless `--force`. |
 | `modpack add <mod> [--version] [--mode] [--with-deps] [--url]` | Adds a mod from Modrinth or CurseForge (slug, id or URL) or from a local jar, and updates the manifest. Asks for the version when several fit. |
 | `modpack remove <key>` | Removes a mod from the repository and from the modes that list it. The only way a mod leaves the pack. |
-| `modpack manifest [--check]` | Updates `mods.lock.toml` from `mods/`: adds the new jars, rebuilds the entries whose jar changed. A jar missing from `mods/` keeps its entry, with a warning (not installed here is not removed). `--check` fails when it is stale. Run by the `pre-commit` hook. |
-| `modpack install [--force]` | Downloads the missing jars into `mods/`, then reloads the mode loaded in the instance. Run by the `post-merge` and `post-checkout` hooks. |
+| `modpack manifest [--check]` | Updates `mods.lock.toml` from `mods/`: adds the new jars, rebuilds the entries whose jar changed. A jar missing from `mods/` keeps its entry, with a warning (not installed here is not removed). A jar `modpack install` downloaded that the manifest no longer lists is never added back. `--check` fails when it is stale. Run by the `pre-commit` hook. |
+| `modpack install [--force]` | Downloads the missing jars into `mods/`, removes the ones it downloaded that the manifest no longer lists (recorded in `.modpack/local/installed.toml`), then reloads the mode loaded in the instance. Run by the `post-merge` and `post-checkout` hooks. |
 | `modpack mode list` | Lists the modes and marks the loaded one. |
 | `modpack mode load <mode> [--force]` | Loads a mode into the instance. Refuses while Minecraft runs; stops on files changed in the instance, unless `--force`. |
 | `modpack status [--json]` | Loaded mode, drift, jars unknown to the manifest, state of the manifest. The JSON format is in [`docs/status.md`](docs/status.md). |

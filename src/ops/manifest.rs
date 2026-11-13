@@ -383,6 +383,36 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_jar_install_placed_is_not_added_back_once_dropped() {
+        let root = repo();
+        put(root.path(), "sodium-1.0.0.jar", b"sodium");
+        let hashes = hash_file(&root.path().join("mods/sodium-1.0.0.jar")).unwrap();
+        let mut installed = crate::model::installed::Installed::default();
+        installed
+            .jars
+            .insert("mods/sodium-1.0.0.jar".into(), hashes.sha1);
+        installed.save(root.path()).unwrap();
+        put(root.path(), "jei-1.0.0.jar", b"jei");
+
+        assert_eq!(
+            check(root.path()).unwrap().len(),
+            2,
+            "no manifest, one new jar"
+        );
+        let changes = regenerate(root.path(), &registry()).unwrap();
+        assert_eq!(changes.added, ["jei"]);
+        assert!(load(root.path()).get("sodium").is_none());
+        assert!(check(root.path()).unwrap().is_empty());
+
+        // Changed by hand, it is the user's again.
+        put(root.path(), "sodium-1.0.0.jar", b"sodium, patched");
+        assert_eq!(
+            check(root.path()).unwrap(),
+            ["new jar: mods/sodium-1.0.0.jar"]
+        );
+    }
+
+    #[test]
     fn up_to_date_manifest_is_not_rewritten() {
         let root = repo();
         let registry = registry();

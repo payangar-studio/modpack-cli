@@ -22,9 +22,9 @@ With `--json`, the report is one JSON object on stdout. This format is the contr
 | `instance.mode` | Mode loaded last, or `null` before the first `modpack mode load`. |
 | `instance.drift` | Files the CLI wrote into the instance that changed or were deleted since, relative to the instance, with `/` separators. |
 | `instance.unknown_jars` | Jars of the instance's `mods/` whose sha1 and sha512 match no manifest entry, whatever their file name, with their hashes so they can be looked up on the platforms. |
-| `missing_jars` | Manifest entries whose jar is absent from `mods/` of the repository: `modpack install` downloads them. |
+| `missing_jars` | Manifest entries whose jar is absent from `mods/` of the repository, or replaced by an older jar `modpack install` downloaded and nobody changed since: `modpack install` downloads them. |
 | `manifest.stale` | `true` when `new_jars` or `changed` is not empty: `modpack manifest` regenerates the manifest. |
-| `manifest.new_jars` | Jars of `mods/` of the repository that no entry lists. |
+| `manifest.new_jars` | Jars of `mods/` of the repository that no entry lists, except the ones `modpack install` downloaded and nobody changed since: those are removed by the next `modpack install`, never added back. |
 | `manifest.changed` | Entries whose jar is in `mods/` of the repository with other hashes than the manifest's. |
 
 Only hashes are compared: the report never asks a platform about a jar.

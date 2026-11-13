@@ -15,6 +15,7 @@ use std::thread;
 use super::hash::copy_hashing;
 use super::jar_path;
 use crate::error::{Context, Error, Result};
+use crate::model::installed::Installed;
 use crate::model::manifest::Entry;
 use crate::platform::{Download, Registry};
 
@@ -155,13 +156,14 @@ pub fn download(root: &Path, entry: &Entry, sources: Sources<'_>) -> Result<(), 
     Err(fail(attempts))
 }
 
-/// Downloads several jars, at most [`PARALLEL`] at a time. The results are in
-/// the order of `entries`.
+/// Downloads several jars, at most [`PARALLEL`] at a time, and records the
+/// ones downloaded in [`Installed`]. The results are in the order of
+/// `entries`.
 pub fn download_all(
     root: &Path,
     entries: &[&Entry],
     sources: Sources<'_>,
-) -> Vec<Result<(), Failure>> {
+) -> Result<Vec<Result<(), Failure>>> {
     let next = AtomicUsize::new(0);
     let results = Mutex::new(Vec::with_capacity(entries.len()));
     thread::scope(|scope| {
@@ -178,7 +180,21 @@ pub fn download_all(
     });
     let mut results = results.into_inner().expect("no worker panics");
     results.sort_by_key(|(i, _)| *i);
-    results.into_iter().map(|(_, r)| r).collect()
+    let done: Vec<&Entry> = results
+        .iter()
+        .filter(|(_, r)| r.is_ok())
+        .map(|(i, _)| entries[*i])
+        .collect();
+    if !done.is_empty() {
+        let mut installed = Installed::load(root)?;
+        for entry in done {
+            installed
+                .jars
+                .insert(entry.path.clone(), entry.hashes.sha1.clone());
+        }
+        installed.save(root)?;
+    }
+    Ok(results.into_iter().map(|(_, r)| r).collect())
 }
 
 fn write_verified(reader: &mut dyn Read, dest: &Path, entry: &Entry) -> Result<()> {
@@ -469,10 +485,13 @@ pub(crate) mod tests {
             registry: &Registry::new(Vec::new()),
             fetch: &fetch,
         };
-        let results = download_all(root.path(), &refs, sources);
+        let results = download_all(root.path(), &refs, sources).unwrap();
         assert_eq!(results.len(), entries.len());
+        let installed = Installed::load(root.path()).unwrap();
         for (i, result) in results.iter().enumerate() {
             assert_eq!(result.is_ok(), i % 3 != 0, "mod{i}");
+            let e = &entries[i];
+            assert_eq!(installed.placed(&e.path, &e.hashes.sha1), result.is_ok());
             if let Err(failure) = result {
                 assert_eq!(failure.key, format!("mod{i}"));
             }

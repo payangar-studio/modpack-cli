@@ -38,9 +38,9 @@ permissions:
 
 jobs:
   publish:
-    uses: payangar-studio/modpack-cli/.github/workflows/publish-modpack.yml@v0.1.0
+    uses: payangar-studio/modpack-cli/.github/workflows/publish-modpack.yml@v0.1.1
     with:
-      modpack-version: v0.1.0
+      modpack-version: v0.1.1
       platforms: ${{ inputs.platforms || 'modrinth curseforge' }}
       modes: ${{ inputs.modes || vars.MODPACK_PUBLISH_MODES }}
       dry-run: ${{ inputs.dry-run == true }}

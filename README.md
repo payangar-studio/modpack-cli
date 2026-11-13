@@ -7,7 +7,7 @@
 On a machine set up with chezmoi, the catalogue installs `modpack` from this repository's releases. By hand, on Linux x86_64:
 
 ```sh
-version=0.1.0
+version=0.1.1
 curl -LO "https://github.com/payangar-studio/modpack-cli/releases/download/v$version/modpack-$version-x86_64-unknown-linux-musl.tar.gz"
 curl -LO "https://github.com/payangar-studio/modpack-cli/releases/download/v$version/modpack-$version-x86_64-unknown-linux-musl.tar.gz.sha256"
 sha256sum -c "modpack-$version-x86_64-unknown-linux-musl.tar.gz.sha256"

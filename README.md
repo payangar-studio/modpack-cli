@@ -81,3 +81,7 @@ Running the workflow by hand (Actions, Publish, Run workflow) from the tag publi
 ## Development
 
 `AGENTS.md` describes the layout, the conventions and how to run the tests. Pushing a `v*` tag on this repository publishes a release with the static Linux binary.
+
+## License
+
+MIT, see [`LICENSE`](LICENSE).

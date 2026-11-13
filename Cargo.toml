@@ -3,6 +3,7 @@ name = "modpack-cli"
 version = "0.1.0"
 edition = "2024"
 description = "CLI of the Minecraft modpack socle"
+license = "MIT"
 publish = false
 
 [[bin]]

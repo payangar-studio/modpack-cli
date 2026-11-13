@@ -10,7 +10,7 @@ The design lives in `payangar-studio/environment`, `docs/design/00-cadrage.md` a
 - `src/cli/mod.rs`: the clap command tree and the dispatch to handlers.
 - `src/cli/<command>.rs`: one file per command (`mode load` is `mode_load.rs`), holding its `Args` and its `run(args, ctx)` handler.
 - `src/prompt.rs`: "ask, or read the argument". Every value a command needs goes through it, so that every command can run without a terminal.
-- `src/error.rs`: error model. Every error says what happened and what to do. Exit codes: 0 success, 1 internal error, 2 usage error (missing argument), 3 blocked (drift or file edited by hand, overridable with `--force`).
+- `src/error.rs`: error model. Every error says what happened and what to do. Exit codes: 0 success, 1 internal error, 2 usage error (missing argument), 3 blocked (drift or file edited by hand, overridable with `--force`; also a failed `modpack test` condition or a platform `modpack pack` cannot build for).
 - `src/context.rs`: context passed to handlers (repository root found by walking up to `.modpack/`, prompt, verbosity).
 - `src/socle/`: what `modpack init` lays down and `modpack update` rewrites, the block markers, and the socle version check that `Context::require_root` runs for every command working in a repository.
 - `src/conditions/`: the checks behind `modpack test`. Static ones read the manifest; `server-starts` installs the loader's server once into the machine cache (`<cache dir>/modpack/servers`), then starts it with the mode's jars and config until `Done`.

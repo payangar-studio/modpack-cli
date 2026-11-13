@@ -2,7 +2,9 @@
 //!
 //! Each mode gets its resolved conditions (global ones, then its own), or only
 //! the one `--condition` names. Every condition passes, fails or is skipped,
-//! with the reason; the command fails when one condition fails.
+//! with the reason; the command fails when one condition fails, with the
+//! "blocked" exit code (3), so that a failed condition is never taken for an
+//! internal error (1).
 
 use std::io::Write;
 use std::path::Path;
@@ -17,6 +19,9 @@ use crate::model::modes::{self, Modes};
 use crate::store::download::Http;
 
 #[derive(Debug, clap::Args)]
+#[command(
+    after_help = "Exit codes: 0 when no condition failed (skipped ones do not count), 3 when at least one failed, 2 on a usage error, 1 on an internal error."
+)]
 pub struct Args {
     /// Mode to check; all modes when omitted
     pub mode: Option<String>,
@@ -124,7 +129,7 @@ fn test(root: &Path, args: &Args, machine: &Machine<'_>, out: &mut dyn Write) ->
         writeln!(out, "{passed} passed, {failed} failed, {skipped} skipped")?;
     }
     if failed > 0 {
-        return Err(Error::internal(
+        return Err(Error::blocked(
             format!("{failed} condition(s) failed"),
             "see the reasons in the report, fix the pack, then run `modpack test` again",
         ));
@@ -259,7 +264,7 @@ mod tests {
         );
         let (result, out) = run_on(repo.path(), args(Some("lowend"), None, false));
         let err = result.unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::Internal);
+        assert_eq!(err.kind(), ErrorKind::Blocked);
         assert!(err.to_string().contains("1 condition(s) failed"));
         assert!(
             out.contains(

@@ -44,3 +44,28 @@ fn test_outside_a_repository_is_a_usage_error() {
         .code(2)
         .stderr(predicate::str::contains("not inside a modpack repository"));
 }
+
+#[test]
+fn a_failed_condition_exits_with_the_blocked_code() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = fixture();
+    std::fs::create_dir_all(dir.path().join(".modpack")).unwrap();
+    for file in [
+        ".modpack/socle.toml",
+        ".modpack/socle.lock",
+        "mods.lock.toml",
+    ] {
+        std::fs::copy(src.join(file), dir.path().join(file)).unwrap();
+    }
+    std::fs::write(
+        dir.path().join("modes.toml"),
+        "[default.conditions]\nside = \"server\"\n",
+    )
+    .unwrap();
+    modpack(dir.path())
+        .arg("test")
+        .assert()
+        .code(3)
+        .stdout(predicate::str::contains("0 passed, 1 failed, 0 skipped"))
+        .stderr(predicate::str::contains("1 condition(s) failed"));
+}

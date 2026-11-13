@@ -29,7 +29,7 @@ With `--json`, the report is one JSON object on stdout. This format is the contr
 
 Only hashes are compared: the report never asks a platform about a jar.
 
-A jar listed in `missing_jars` does not make the manifest stale, although `modpack manifest` would drop its entry: the report cannot tell a jar not downloaded yet from a jar deleted on purpose, and the first is the usual case in a fresh clone, since git does not hold the jars.
+A jar listed in `missing_jars` does not make the manifest stale: a missing jar means "not installed on this machine", never "removed from the pack", and `modpack manifest` keeps its entry. It is the usual case in a fresh clone, since git does not hold the jars. A mod leaves the pack only through `modpack remove <key>`, which also takes its key out of the modes.
 
 Lists are sorted. Paths of jars are relative (`mods/<name>`), to the instance for `unknown_jars`, to the repository otherwise.
 

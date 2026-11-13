@@ -19,8 +19,8 @@ This repository is a Minecraft modpack managed with `modpack-cli` (`modpack`). T
 |---|---|
 | See the state of the instance: loaded mode, drift, unknown jars, stale manifest | `modpack status --json` |
 | Add a mod from Modrinth, CurseForge or a local jar | `modpack add <mod> [--version <v>] [--mode <mode>] [--with-deps]` |
-| Remove a mod from the repository and from every mode | `modpack remove <key>` |
-| Regenerate the manifest after changing `mods/` | `modpack manifest` |
+| Remove a mod from the repository and from every mode (deleting its jar does not) | `modpack remove <key>` |
+| Update the manifest after adding or changing a jar in `mods/` (a missing jar keeps its entry) | `modpack manifest` |
 | Download the missing jars | `modpack install` |
 | List the modes, load one into the instance | `modpack mode list`, `modpack mode load <mode>` |
 | Check the conditions of the modes | `modpack test [mode] --json` |

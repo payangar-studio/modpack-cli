@@ -1,4 +1,5 @@
-//! `modpack manifest`: regenerates the manifest from mods/.
+//! `modpack manifest`: adds the new jars of mods/ to the manifest and
+//! rebuilds the entries whose jar changed. A missing jar keeps its entry.
 
 use std::io::Write;
 
@@ -9,6 +10,9 @@ use crate::ops::manifest::{check, regenerate};
 use crate::platform::Registry;
 
 #[derive(Debug, clap::Args)]
+#[command(
+    after_help = "A jar missing from mods/ means \"not installed here\": its entry is kept, with a warning. `modpack install` downloads it; `modpack remove <key>` takes the mod out of the pack and its modes."
+)]
 pub struct Args {
     /// Fail if the manifest is out of date instead of rewriting it
     #[arg(long)]
@@ -40,13 +44,19 @@ pub fn run(args: Args, ctx: &Context) -> Result<()> {
     for warning in &changes.warnings {
         writeln!(out, "warning: {warning}")?;
     }
+    if !changes.missing.is_empty() {
+        writeln!(
+            out,
+            "warning: jar missing from mods/, entry kept (`modpack install` downloads it, `modpack remove <key>` removes the mod): {}",
+            changes.missing.join(", ")
+        )?;
+    }
     if changes.is_empty() {
         writeln!(out, "{FILE_NAME} is up to date")?;
         return Ok(());
     }
     for (label, keys) in [
         ("added", &changes.added),
-        ("removed, jar gone", &changes.removed),
         ("rebuilt, jar changed", &changes.rebuilt),
     ] {
         if !keys.is_empty() {

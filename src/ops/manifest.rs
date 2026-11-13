@@ -1,5 +1,9 @@
 //! Building manifest entries from the jars of `mods/`, and regenerating the
-//! manifest so that it lists exactly what `mods/` holds.
+//! manifest from what `mods/` holds.
+//!
+//! A jar missing from `mods/` means "not installed on this machine", never
+//! "removed from the pack": its entry stays. Only `modpack remove` takes a mod
+//! out of the pack.
 //!
 //! An entry is built from its jar: hashes first, then every platform of the
 //! registry is asked to identify the jar, and each platform that knows it
@@ -154,8 +158,9 @@ pub fn load_or_new(root: &Path) -> Result<Manifest> {
 pub struct Changes {
     /// Keys of the entries built for new jars.
     pub added: Vec<String>,
-    /// Keys of the entries whose jar is gone.
-    pub removed: Vec<String>,
+    /// Keys of the entries whose jar is missing from `mods/`, kept as they
+    /// are: not installed here does not mean removed from the pack.
+    pub missing: Vec<String>,
     /// Keys of the entries whose jar changed, rebuilt under the same key.
     pub rebuilt: Vec<String>,
     /// Keys of the new or rebuilt entries no platform knows.
@@ -165,25 +170,24 @@ pub struct Changes {
 
 impl Changes {
     pub fn is_empty(&self) -> bool {
-        self.added.is_empty() && self.removed.is_empty() && self.rebuilt.is_empty()
+        self.added.is_empty() && self.rebuilt.is_empty()
     }
 }
 
 /// Rewrites the manifest from `mods/`: new jars are identified and added,
-/// entries whose jar is gone are removed, entries whose jar changed are
-/// rebuilt under the same key. Writes the file only when something changed,
-/// or when it did not exist.
+/// entries whose jar changed are rebuilt under the same key, entries whose jar
+/// is missing are kept and reported. Writes the file only when something
+/// changed, or when it did not exist.
 pub fn regenerate(root: &Path, registry: &Registry) -> Result<Changes> {
     let path = root.join(manifest::FILE_NAME);
     let existed = path.is_file();
     let mut manifest = load_or_new(root)?;
     let inv = inventory(root, &manifest)?;
-    let mut changes = Changes::default();
+    let mut changes = Changes {
+        missing: inv.missing.clone(),
+        ..Changes::default()
+    };
 
-    for key in &inv.missing {
-        manifest.remove(key);
-        changes.removed.push(key.clone());
-    }
     let mut drafts = Vec::new();
     for key in &inv.mismatched {
         let jar = manifest
@@ -216,8 +220,9 @@ pub fn regenerate(root: &Path, registry: &Registry) -> Result<Changes> {
     Ok(changes)
 }
 
-/// Differences between the manifest and `mods/`, one line each; empty when
-/// the manifest is up to date. Reads the disk only, never the network.
+/// Differences between the manifest and `mods/` that `regenerate` would
+/// write, one line each; empty when the manifest is up to date. A missing jar
+/// is not one: the entry stays. Reads the disk only, never the network.
 pub fn check(root: &Path) -> Result<Vec<String>> {
     let mut gaps = Vec::new();
     if !root.join(manifest::FILE_NAME).is_file() {
@@ -226,13 +231,6 @@ pub fn check(root: &Path) -> Result<Vec<String>> {
     let manifest = load_or_new(root)?;
     let inv = inventory(root, &manifest)?;
     gaps.extend(inv.unknown.iter().map(|p| format!("new jar: {p}")));
-    gaps.extend(inv.missing.iter().map(|k| {
-        let path = &manifest
-            .get(k)
-            .expect("inventory keys are manifest keys")
-            .path;
-        format!("jar gone: {k} ({path})")
-    }));
     gaps.extend(inv.mismatched.iter().map(|k| {
         let path = &manifest
             .get(k)
@@ -350,30 +348,35 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn gone_jar_is_removed_and_changed_jar_rebuilt_under_its_key() {
+    fn missing_jar_keeps_its_entry_and_changed_jar_is_rebuilt_under_its_key() {
         let root = repo();
         put(root.path(), "sodium-1.0.0.jar", b"sodium");
         put(root.path(), "custom.jar", b"v1");
         let registry = registry();
         regenerate(root.path(), &registry).unwrap();
+        let path = root.path().join(manifest::FILE_NAME);
 
         fs::remove_file(root.path().join("mods/sodium-1.0.0.jar")).unwrap();
-        put(root.path(), "custom.jar", b"jei");
-        let mut gaps = check(root.path()).unwrap();
-        gaps.sort();
-        assert_eq!(
-            gaps,
-            [
-                "jar changed: custom (mods/custom.jar)",
-                "jar gone: sodium (mods/sodium-1.0.0.jar)"
-            ]
-        );
-
+        assert!(check(root.path()).unwrap().is_empty());
+        let before = fs::read_to_string(&path).unwrap();
         let changes = regenerate(root.path(), &registry).unwrap();
-        assert_eq!(changes.removed, ["sodium"]);
+        assert!(changes.is_empty());
+        assert_eq!(changes.missing, ["sodium"]);
+        assert_eq!(fs::read_to_string(&path).unwrap(), before);
+
+        put(root.path(), "custom.jar", b"jei");
+        assert_eq!(
+            check(root.path()).unwrap(),
+            ["jar changed: custom (mods/custom.jar)"]
+        );
+        let changes = regenerate(root.path(), &registry).unwrap();
+        assert_eq!(changes.missing, ["sodium"]);
         assert_eq!(changes.rebuilt, ["custom"]);
         let manifest = load(root.path());
-        assert_eq!(manifest.keys().into_iter().collect::<Vec<_>>(), ["custom"]);
+        assert_eq!(
+            manifest.keys().into_iter().collect::<Vec<_>>(),
+            ["custom", "sodium"]
+        );
         let custom = manifest.get("custom").unwrap();
         assert_eq!(custom.platform("fake").unwrap()["id"].as_str(), Some("jei"));
         assert!(check(root.path()).unwrap().is_empty());

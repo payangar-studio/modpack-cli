@@ -14,7 +14,7 @@ use std::path::Path;
 use super::manifest::{Draft, complete, first_line, load_or_new};
 use super::modes_edit;
 use crate::error::{Context, Error, Result};
-use crate::model::manifest::{self, Entry, Env, Hashes, Manifest};
+use crate::model::manifest::{self, Entry, Env, Hashes, Manifest, Pack};
 use crate::model::modes::DEFAULT_MODE;
 use crate::platform::{Candidate, Download, Platform};
 use crate::prompt::Prompt;
@@ -227,7 +227,7 @@ fn add_remote(
     out: &mut dyn Write,
 ) -> Result<String> {
     let (platform, candidates) = resolve(sources, on, query, manifest)?;
-    let candidate = choose(candidates, query, choice)?;
+    let candidate = choose(candidates, query, &manifest.pack, choice)?;
     let name = platform.name();
 
     let previous = manifest
@@ -327,7 +327,15 @@ fn resolve<'a>(
     }))
 }
 
-fn choose(mut candidates: Vec<Candidate>, query: &str, choice: Choice<'_>) -> Result<Candidate> {
+/// How many versions an error lists at most.
+const LISTED_VERSIONS: usize = 10;
+
+fn choose(
+    mut candidates: Vec<Candidate>,
+    query: &str,
+    pack: &Pack,
+    choice: Choice<'_>,
+) -> Result<Candidate> {
     if let Some(wanted) = choice.version {
         return candidates
             .iter()
@@ -336,7 +344,7 @@ fn choose(mut candidates: Vec<Candidate>, query: &str, choice: Choice<'_>) -> Re
             .ok_or_else(|| {
                 let labels: Vec<&str> = candidates
                     .iter()
-                    .take(10)
+                    .take(LISTED_VERSIONS)
                     .map(|c| c.label.as_str())
                     .collect();
                 Error::usage(
@@ -349,10 +357,55 @@ fn choose(mut candidates: Vec<Candidate>, query: &str, choice: Choice<'_>) -> Re
         Some(prompt) if candidates.len() > 1 => prompt,
         _ => return Ok(candidates.swap_remove(0)),
     };
+    if !prompt.is_interactive() {
+        return Err(several_versions(&candidates, query, pack));
+    }
     let labels: Vec<String> = candidates.iter().map(|c| c.label.clone()).collect();
     let picked = prompt.select(None, "--version", &format!("Version of {query}"), &labels)?;
     let index = labels.iter().position(|l| *l == picked).unwrap_or(0);
     Ok(candidates.swap_remove(index))
+}
+
+/// Several versions fit and there is no terminal to ask: lists them, in the
+/// platform's order (newest first), and the argument that picks one.
+fn several_versions(candidates: &[Candidate], query: &str, pack: &Pack) -> Error {
+    let mut what = format!(
+        "`{query}` has {} versions for Minecraft {} with {}, and no terminal to ask which one (newest first):",
+        candidates.len(),
+        pack.minecraft,
+        pack.loader
+    );
+    for candidate in candidates.iter().take(LISTED_VERSIONS) {
+        what.push_str(&format!("\n  - {}", version_arg(candidate)));
+    }
+    if candidates.len() > LISTED_VERSIONS {
+        what.push_str(&format!(
+            "\n  - and {} older",
+            candidates.len() - LISTED_VERSIONS
+        ));
+    }
+    Error::usage(
+        what,
+        format!(
+            "pass the version with --version, e.g. `modpack add {query} --version {}`",
+            version_arg(&candidates[0])
+        ),
+    )
+}
+
+/// What to pass to `--version` for a candidate: its label up to a
+/// parenthesis, quoted for the shell when it holds a space.
+fn version_arg(candidate: &Candidate) -> String {
+    let name = candidate
+        .label
+        .split(" (")
+        .next()
+        .unwrap_or(&candidate.label);
+    if name.contains(char::is_whitespace) {
+        format!("'{}'", name.replace('\'', "'\\''"))
+    } else {
+        name.to_owned()
+    }
 }
 
 /// Whether `wanted` names the candidate: its label, the name before a
@@ -776,7 +829,19 @@ mod tests {
             .0
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Usage);
-        assert!(err.to_string().contains("--version"), "{err}");
+        let text = err.to_string();
+        assert!(
+            text.contains("`sodium` has 2 versions for Minecraft 1.21.1 with neoforge"),
+            "{text}"
+        );
+        assert!(
+            text.contains("\n  - sodium-1.0.0.jar\n  - 0.9.0\n"),
+            "{text}"
+        );
+        assert_eq!(
+            err.hint(),
+            "pass the version with --version, e.g. `modpack add sodium --version sodium-1.0.0.jar`"
+        );
 
         let mut req = request("sodium");
         req.version = Some("0.9.0".into());
@@ -790,6 +855,21 @@ mod tests {
             err.hint().contains("sodium-1.0.0.jar, 0.9.0"),
             "{}",
             err.hint()
+        );
+    }
+
+    #[test]
+    fn version_argument_drops_the_details_and_quotes_spaces() {
+        let candidate = |label: &str| Candidate {
+            label: label.into(),
+            slug: None,
+            file_name: "a.jar".into(),
+            section: toml::Table::new(),
+        };
+        assert_eq!(version_arg(&candidate("0.6.0+mc1.21.1")), "0.6.0+mc1.21.1");
+        assert_eq!(
+            version_arg(&candidate("Jade 15.1 (release, 2024-08-01)")),
+            "'Jade 15.1'"
         );
     }
 

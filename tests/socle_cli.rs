@@ -72,8 +72,15 @@ fn init_creates_a_complete_repository() {
 
     let lock = SocleLock::load(&root).unwrap();
     let paths: Vec<_> = lock.files.iter().map(|f| f.path.as_str()).collect();
-    assert_eq!(paths, [".gitignore", ".modpack/README.md", "AGENTS.md"]);
-    let readme = &lock.files[1];
+    // Contains rather than equals: each socle skill adds its own files.
+    for path in [".gitignore", ".modpack/README.md", "AGENTS.md"] {
+        assert!(paths.contains(&path), "{path} not in the lock");
+    }
+    let readme = lock
+        .files
+        .iter()
+        .find(|f| f.path == ".modpack/README.md")
+        .unwrap();
     assert_eq!(readme.kind, LockedKind::File);
     assert_eq!(
         sha256_file(&root.join(&readme.path)).unwrap(),

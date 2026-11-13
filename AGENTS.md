@@ -36,6 +36,7 @@ Each issue owns its command handler (`src/cli/<command>.rs`, including its `Args
 - Integration tests of the CLI live in `tests/` and drive the binary with `assert_cmd`. Fixtures go in `tests/fixtures/`.
 - No network call in default tests. A test that needs the network is `#[ignore]` and run explicitly (`cargo test -- --ignored`); a CurseForge one also skips itself when `CURSEFORGE_API_KEY` is not set.
 - Locally, run only the tests of the code you touched (`cargo test <filter>`), plus `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings`. The full suite runs in CI on every push and pull request.
+- End-to-end validation of a feature runs on the private pack `payangar-studio/test-pack` (usual clone `~/dev/minecraft/test-pack`, Modrinth instance "Test Pack"). Its Modrinth project `sqs4OHOo` (`modpack-cli-test-pack`, a draft never submitted for review) is the publication target of tests.
 
 ## Release
 

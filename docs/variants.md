@@ -42,8 +42,14 @@ There is one level of variants. The default variant is the full pack; every othe
 
 - `description`: shown by `modpack variant list`.
 - `remove`: keys taken out. The default variant starts from every mod of the manifest; another variant starts from the default variant's selection.
-- `add` (other variants only): keys added to the default variant's selection. A key added must be one the default variant removes: a mod of one variant only is in the manifest, removed from the default variant and added by its variant. `modpack add <mod> --variant <variant>` writes both.
+- `add` (other variants only): keys added to the default variant's selection. A key added must be one the default variant removes: a mod of one variant only is in the manifest, removed from the default variant and added by its variant.
 - `conditions`: the variant's own conditions, see below.
+
+`modpack add <mod> --variant <variant>` puts a new mod in some variants only, and writes these lists for it. `--variant` repeats, and `default` names the default variant:
+
+- Without `--variant`, the mod is in every variant.
+- `--variant server --variant hardcore`: the default variant removes the mod, `server` and `hardcore` add it.
+- `--variant default --variant hardcore`: the mod stays in the default selection, and every other variant not named (here `server`) removes it. This is how a client-only mod leaves a `side = "server"` variant.
 
 A file without `[default]` is a default variant with every mod. The name `default` is reserved: `[variants.default]` is refused. So are a nested variant (`[variants.server.lowend]`), an unknown field, and a key the manifest does not have. `modpack remove <key>` takes the key out of every variant.
 

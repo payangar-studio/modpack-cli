@@ -47,6 +47,44 @@ pub fn move_to_variant(doc: &mut DocumentMut, key: &str, variant: &str) -> Resul
     push_value(default, "remove", key)
 }
 
+/// Makes `key` a mod of `variants` only. Without the default variant among them, the
+/// default variant removes `key` and each of `variants` adds it; with it, `key`
+/// stays in the default selection and every other variant not in `variants` removes
+/// it. Where `key` was placed before, in the `add` or `remove` of a variant, is
+/// dropped first. Returns the variants that now remove `key`. Variants other than
+/// the default one must already exist.
+pub fn restrict_to_variants(
+    doc: &mut DocumentMut,
+    key: &str,
+    variants: &[&str],
+) -> Result<Vec<String>> {
+    remove_key(doc, key);
+    if !variants.contains(&DEFAULT_VARIANT) {
+        variants
+            .iter()
+            .try_for_each(|m| move_to_variant(doc, key, m))?;
+        return Ok(vec![DEFAULT_VARIANT.to_owned()]);
+    }
+    let Some(all) = doc.get_mut("variants").and_then(Item::as_table_like_mut) else {
+        return Ok(Vec::new());
+    };
+    let mut excluded = Vec::new();
+    for (name, variant) in all.iter_mut() {
+        if variants.contains(&name.get()) {
+            continue;
+        }
+        let variant = variant.as_table_like_mut().ok_or_else(|| {
+            Error::usage(
+                format!("variants.toml: variant `{name}` is not a table"),
+                HINT,
+            )
+        })?;
+        push_value(variant, "remove", key)?;
+        excluded.push(name.get().to_owned());
+    }
+    Ok(excluded)
+}
+
 /// Loads `<root>/variants.toml`, applies `edit`, and writes the file back if the
 /// text changed. A missing file is an empty one, written only if `edit`
 /// changes it.
@@ -247,6 +285,65 @@ mod tests {
         let mut doc = doc(&fixture());
         let err = move_to_variant(&mut doc, "jei", "lowend").unwrap_err();
         assert!(err.to_string().contains("no variant `lowend`"));
+    }
+
+    #[test]
+    fn restricting_to_variants_without_the_default_one_moves_the_key() {
+        let mut doc = doc(&fixture());
+        let excluded = restrict_to_variants(&mut doc, "sodium", &["server", "hardcore"]).unwrap();
+        assert_eq!(excluded, [DEFAULT_VARIANT]);
+        let parsed = variants::Variants::parse(&doc.to_string()).unwrap();
+        assert!(parsed.default.remove.contains(&"sodium".to_owned()));
+        for name in ["server", "hardcore"] {
+            assert!(
+                parsed.variants[name].add.contains(&"sodium".to_owned()),
+                "{doc}"
+            );
+        }
+    }
+
+    #[test]
+    fn restricting_to_variants_with_the_default_one_removes_from_the_others() {
+        let before = fixture();
+        let mut doc = doc(&before);
+        let excluded = restrict_to_variants(&mut doc, "jei", &[DEFAULT_VARIANT, "server"]).unwrap();
+        assert_eq!(excluded, ["hardcore"]);
+        // `server` is named: it no longer removes `jei`.
+        let expected = before.replace(
+            "remove = [\"sodium\", \"iris\", \"jei\"]",
+            "remove = [\"sodium\", \"iris\"]",
+        );
+        assert_eq!(doc.to_string(), format!("{expected}remove = [\"jei\"]\n"));
+        // A mod of some variants only, placed again with the default one, leaves
+        // the default `remove` and the `add` of its former variants.
+        let mut doc = self::doc(&before);
+        restrict_to_variants(&mut doc, "hardcore-tweaks", &[DEFAULT_VARIANT, "hardcore"]).unwrap();
+        let parsed = variants::Variants::parse(&doc.to_string()).unwrap();
+        assert!(parsed.default.remove.is_empty(), "{doc}");
+        assert!(parsed.variants["hardcore"].add.is_empty(), "{doc}");
+        assert!(
+            parsed.variants["server"]
+                .remove
+                .contains(&"hardcore-tweaks".to_owned()),
+            "{doc}"
+        );
+        let mut doc = self::doc(&before);
+        restrict_to_variants(&mut doc, "newmod", &[DEFAULT_VARIANT]).unwrap();
+        let parsed = variants::Variants::parse(&doc.to_string()).unwrap();
+        assert!(!parsed.default.remove.contains(&"newmod".to_owned()));
+        for name in ["server", "hardcore"] {
+            assert!(
+                parsed.variants[name].remove.contains(&"newmod".to_owned()),
+                "{doc}"
+            );
+        }
+        // Every variant named: nothing to write.
+        let mut doc = self::doc(&before);
+        let excluded =
+            restrict_to_variants(&mut doc, "newmod", &[DEFAULT_VARIANT, "server", "hardcore"])
+                .unwrap();
+        assert!(excluded.is_empty());
+        assert_eq!(doc.to_string(), before);
     }
 
     #[test]

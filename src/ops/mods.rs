@@ -37,8 +37,9 @@ pub struct AddRequest {
     /// Slug, id or URL of a mod on a platform, or path to a local jar.
     pub mod_ref: String,
     pub version: Option<String>,
-    /// Variant the mod is for, alone; `None` puts it in every variant.
-    pub variant: Option<String>,
+    /// Variants the mod is for, alone, `default` included or not; empty puts it
+    /// in every variant.
+    pub variants: Vec<String>,
     /// Direct URL of a jar no platform knows.
     pub url: Option<String>,
     /// Add the missing required dependencies without asking.
@@ -84,8 +85,10 @@ pub fn add(
     req: &AddRequest,
     out: &mut dyn Write,
 ) -> Result<String> {
-    let variant = req.variant.as_deref().filter(|m| *m != DEFAULT_VARIANT);
-    if let Some(variant) = variant {
+    let mut variants: Vec<&str> = req.variants.iter().map(String::as_str).collect();
+    variants.sort_unstable();
+    variants.dedup();
+    for variant in variants.iter().filter(|m| **m != DEFAULT_VARIANT) {
         variants_edit::require_variant(root, variant)?;
     }
     let mut edit = Edit {
@@ -153,17 +156,25 @@ pub fn add(
         }
     }
 
-    if let Some(variant) = variant.filter(|_| !added.is_empty()) {
-        variants_edit::edit(root, |doc| {
-            added
-                .iter()
-                .try_for_each(|k| variants_edit::move_to_variant(doc, k, variant))
+    if !variants.is_empty() && !added.is_empty() {
+        let excluded = variants_edit::edit(root, |doc| {
+            let mut excluded = Vec::new();
+            for k in &added {
+                excluded = variants_edit::restrict_to_variants(doc, k, &variants)?;
+            }
+            Ok(excluded)
         })?;
-        writeln!(
-            out,
-            "variant `{variant}`: {} removed from the default variant and added to `{variant}`",
-            quoted(&added)
-        )?;
+        let keys = quoted(&added);
+        if !variants.contains(&DEFAULT_VARIANT) {
+            let named: Vec<String> = variants.iter().map(|m| (*m).to_owned()).collect();
+            writeln!(
+                out,
+                "{keys} removed from the default variant and added to {}",
+                quoted(&named)
+            )?;
+        } else if !excluded.is_empty() {
+            writeln!(out, "{keys} removed from {}", quoted(&excluded))?;
+        }
     }
     Ok(key)
 }
@@ -889,7 +900,7 @@ mod tests {
         let root = repo();
         fs::write(root.path().join("variants.toml"), VARIANTS).unwrap();
         let mut req = request("sodium");
-        req.variant = Some("server".into());
+        req.variants = vec!["server".into()];
         let (result, out) = run_add(root.path(), &registry(), &req);
         result.unwrap();
         assert!(out.contains("added to `server`"), "{out}");
@@ -901,11 +912,52 @@ mod tests {
     }
 
     #[test]
+    fn variants_with_the_default_one_remove_the_mod_from_the_others() {
+        let root = repo();
+        let variants = format!("{VARIANTS}\n[variants.lite]\n");
+        fs::write(root.path().join("variants.toml"), &variants).unwrap();
+        let mut req = request("sodium");
+        req.variants = vec!["lite".into(), "default".into(), "lite".into()];
+        let (result, out) = run_add(root.path(), &registry(), &req);
+        result.unwrap();
+        assert!(out.contains("`sodium` removed from `server`\n"), "{out}");
+        assert_eq!(
+            fs::read_to_string(root.path().join("variants.toml")).unwrap(),
+            variants.replace("remove = [\"jei\"]", "remove = [\"jei\", \"sodium\"]")
+        );
+    }
+
+    #[test]
+    fn several_variants_without_the_default_one_each_add_the_mod() {
+        let root = repo();
+        fs::write(
+            root.path().join("variants.toml"),
+            format!("{VARIANTS}\n[variants.lite]\n"),
+        )
+        .unwrap();
+        let mut req = request("sodium");
+        req.variants = vec!["server".into(), "lite".into()];
+        let (result, out) = run_add(root.path(), &registry(), &req);
+        result.unwrap();
+        assert!(
+            out.contains("removed from the default variant and added to `lite`, `server`"),
+            "{out}"
+        );
+        let variants = fs::read_to_string(root.path().join("variants.toml")).unwrap();
+        assert_eq!(
+            variants.matches("add = [\"sodium\"]").count(),
+            2,
+            "{variants}"
+        );
+        assert!(variants.contains("[default]\ndescription = \"Full\"\nremove = [\"sodium\"]\n"));
+    }
+
+    #[test]
     fn unknown_variant_is_refused_before_anything_is_downloaded() {
         let root = repo();
         fs::write(root.path().join("variants.toml"), VARIANTS).unwrap();
         let mut req = request("sodium");
-        req.variant = Some("lowend".into());
+        req.variants = vec!["lowend".into()];
         let err = run_add(root.path(), &registry(), &req).0.unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Usage);
         assert!(!root.path().join("mods/sodium-1.0.0.jar").exists());
@@ -963,7 +1015,7 @@ mod tests {
         fs::write(root.path().join("variants.toml"), VARIANTS).unwrap();
         let mut req = request("sodium");
         req.with_deps = true;
-        req.variant = Some("server".into());
+        req.variants = vec!["server".into()];
         let (result, out) = run_add(root.path(), &with_dependency(), &req);
         result.unwrap();
         let manifest = load(root.path());

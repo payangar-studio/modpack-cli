@@ -7,6 +7,10 @@ use crate::platform::Registry;
 use crate::store::download::{Http, Sources};
 
 #[derive(Debug, clap::Args)]
+#[command(after_help = "Examples:
+  modpack add sodium                                every variant
+  modpack add sodium --variant default --variant lite     the default and lite variants; every other variant removes it
+  modpack add ./tweaks.jar --variant server            the server variant only")]
 pub struct Args {
     /// Modrinth or CurseForge project (slug, id or URL), or path to a local jar
     #[arg(value_name = "MOD")]
@@ -14,9 +18,11 @@ pub struct Args {
     /// Version of the mod to add
     #[arg(long)]
     pub version: Option<String>,
-    /// Add the mod to this variant only
-    #[arg(long)]
-    pub variant: Option<String>,
+    /// Add the mod to this variant only; repeat for several variants. `default` names
+    /// the default variant: with it, the variants not named remove the mod. Without
+    /// --variant, the mod is in every variant
+    #[arg(long = "variant", value_name = "VARIANT")]
+    pub variants: Vec<String>,
     /// Direct URL of a local jar that no platform hosts
     #[arg(long)]
     pub url: Option<String>,
@@ -41,7 +47,7 @@ pub fn run(args: Args, ctx: &Context) -> Result<()> {
     let req = AddRequest {
         mod_ref: args.mod_ref,
         version: args.version,
-        variant: args.variant,
+        variants: args.variants,
         url: args.url,
         with_deps: args.with_deps,
         force: args.force,

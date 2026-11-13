@@ -79,12 +79,11 @@ A mod with no `[mods.curseforge]` table may simply have been added while no Curs
 
 ### Platforms
 
-Build every pack into a throwaway directory, which is a dry run of the publication:
+Build every pack into a throwaway directory, `/tmp/modpack-audit-<name of the repository directory>`, which is a dry run of the publication. Each command runs in a fresh shell: write the path out in full in both.
 
 ```bash
-out=$(mktemp -d)
-modpack pack --out "$out" --json
-rm -rf "$out"
+modpack pack --out "/tmp/modpack-audit-<name of the repository directory>" --json
+rm -rf "/tmp/modpack-audit-<name of the repository directory>"
 ```
 
 Exit code 3 with a JSON report is expected when a platform is blocked. In the report, `blocked` lists for each variant and platform the mods that stop it, with the reason: a `.mrpack` only downloads from Modrinth, GitHub or GitLab (another mod must be embedded with its author's permission), and a CurseForge pack only takes mods hosted on CurseForge or on its approved list of third-party mods, which has no API. Warn about every blocked pair, and say which of its mods are new since the base.

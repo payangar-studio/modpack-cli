@@ -50,6 +50,17 @@ fn read(root: &Path, path: &str) -> String {
 }
 
 #[test]
+fn init_names_the_directory_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    modpack(tmp.path())
+        .arg("init")
+        .args(INIT_ARGS)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Created modpack `Test Pack` in .\n"));
+}
+
+#[test]
 fn init_creates_a_complete_repository() {
     let (_tmp, root) = init_repo();
     for path in [

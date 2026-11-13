@@ -17,6 +17,8 @@ This repository is a Minecraft modpack managed with `modpack-cli` (`modpack`). T
 
 | To | Run |
 |---|---|
+| Prepare a fresh clone on this machine: git hooks, jars, Modrinth instance, default mode | `modpack setup [--no-launch]` |
+| Bring the socle of this repository to the CLI's version | `modpack update` |
 | See the state of the instance: loaded mode, drift, unknown jars, stale manifest | `modpack status --json` |
 | Add a mod from Modrinth, CurseForge or a local jar | `modpack add <mod> [--version <v>] [--mode <mode>] [--with-deps]` |
 | Remove a mod from the repository and from every mode (deleting its jar does not) | `modpack remove <key>` |
@@ -25,6 +27,9 @@ This repository is a Minecraft modpack managed with `modpack-cli` (`modpack`). T
 | List the modes, load one into the instance | `modpack mode list`, `modpack mode load <mode>` |
 | Check the conditions of the modes | `modpack test [mode] --json` |
 | Build the packs | `modpack pack [mode] --json` |
+| Push `page/` to the platforms that have an API (never in CI) | `modpack page push [--platform <platform>]` |
+| See which platform secrets are set, without their values | `modpack auth --status` |
+| Create a new pack repository, elsewhere | `modpack init [dir]` |
 
 Every command runs without a terminal: a missing value is an error that names the argument to pass. Never pass `--force` without the user's go: it overwrites what they changed.
 

@@ -106,6 +106,36 @@ fn skills_only_use_existing_commands_and_flags() {
     assert!(checked > 20, "only {checked} invocations found");
 }
 
+/// The block names every command of the CLI, down to the nested ones.
+#[test]
+fn the_block_lists_every_command() {
+    fn leaves(cmd: &clap::Command, prefix: &str, out: &mut Vec<String>) {
+        for sub in cmd.get_subcommands().filter(|s| s.get_name() != "help") {
+            let name = format!("{prefix}{} ", sub.get_name());
+            if sub.has_subcommands() {
+                leaves(sub, &name, out);
+            } else {
+                out.push(name.trim_end().to_owned());
+            }
+        }
+    }
+    let mut commands = Vec::new();
+    leaves(&Cli::command(), "", &mut commands);
+    let listed: Vec<String> = code_of(&template(BLOCK))
+        .iter()
+        .flat_map(|code| invocations(code))
+        .map(|words| words.join(" "))
+        .collect();
+    for command in commands {
+        assert!(
+            listed
+                .iter()
+                .any(|l| l == &command || l.starts_with(&format!("{command} "))),
+            "`modpack {command}` missing from {BLOCK}"
+        );
+    }
+}
+
 #[test]
 fn the_return_skill_reads_the_status_json() {
     let text = skill_template("modpack-return");

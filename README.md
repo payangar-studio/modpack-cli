@@ -74,7 +74,8 @@ What gets published:
 
 - version `1.2.0` from tag `v1.2.0`. A suffix makes a prerelease: `-alpha…` is an alpha, any other suffix a beta;
 - the default mode as the version itself, every other mode as `<version>+<mode>` on Modrinth and `<name> <version> (<mode>)` on CurseForge;
-- the changelog is `changelogs/<version>.md` when it exists, else the tag's message.
+- the changelog is `changelogs/<version>.md` when it exists, else the tag's message;
+- on each platform, the other modes first and the default mode last, so that the newest version is always the default mode's. When the default mode fails to publish, the run fails and its summary says so: the other modes may already be published, and the default mode is published alone by running the workflow by hand from the tag with modes `default`.
 
 A Modrinth project deleted on Modrinth is recovered by emptying `[modrinth] project_id` in `page/page.toml`, then running `modpack page push`, which creates a new project and records its id. Commit it: the next tag publishes to the new project, while a tag made before it still reads the old id from its own `page/page.toml`.
 

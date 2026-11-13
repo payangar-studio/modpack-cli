@@ -197,3 +197,54 @@ fn only_the_platforms_with_a_project_are_built_and_published() {
     }
     assert!(!workflow.contains("contains(inputs.platforms"));
 }
+
+/// The jq filter the publish steps read the artifacts of a platform with.
+fn artifacts_filter() -> String {
+    let workflow = reusable();
+    let line = workflow
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("ARTIFACTS: "))
+        .expect("ARTIFACTS is set");
+    line.trim_matches('\'').to_owned()
+}
+
+#[test]
+fn the_default_mode_is_published_last_on_each_platform() {
+    for (step, platform) in [
+        ("Publish to Modrinth", "modrinth"),
+        ("Publish to CurseForge", "curseforge"),
+    ] {
+        let script = step_script(step);
+        assert!(
+            script.contains(&format!("jq -r --arg platform {platform} \"$ARTIFACTS\"")),
+            "{step} does not read its artifacts through $ARTIFACTS"
+        );
+        assert!(
+            script.contains("the default mode was not published"),
+            "{step}"
+        );
+    }
+
+    let report = r#"{"artifacts": [
+        {"mode": "default", "platform": "modrinth", "path": "d.mrpack"},
+        {"mode": "server", "platform": "modrinth", "path": "s.mrpack"},
+        {"mode": "default", "platform": "curseforge", "path": "d.zip"},
+        {"mode": "lite", "platform": "modrinth", "path": "l.mrpack"}
+    ]}"#;
+    let output = Process::new("jq")
+        .args(["-r", "--arg", "platform", "modrinth", &artifacts_filter()])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut jq| {
+            use std::io::Write;
+            jq.stdin.take().unwrap().write_all(report.as_bytes())?;
+            jq.wait_with_output()
+        })
+        .expect("jq runs");
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        "server\ts.mrpack\nlite\tl.mrpack\ndefault\td.mrpack\n"
+    );
+}

@@ -58,6 +58,8 @@ env:
   VAULT_ENVIRONMENT: prod
   VAULT_PATH: /app
   USER_AGENT: payangar-studio/modpack-cli publish-workflow
+  # The artifacts of `$platform`, as mode and path, the default mode last.
+  ARTIFACTS: '[.artifacts[] | select(.platform == $platform)] | sort_by(.mode == "default") | .[] | [.mode, .path] | @tsv'
 
 jobs:
   publish:
@@ -286,8 +288,12 @@ jobs:
             else
               echo "::error::Modrinth refused $(basename "$path"): $(cat "$RUNNER_TEMP/modrinth-response.json" 2>/dev/null)"
               failed=1
+              if [[ "$mode" == default ]]; then
+                echo "- Modrinth: the default mode was not published, the other modes published before it are now the newest versions; once fixed, publish it alone by running the workflow by hand from the tag with modes \`default\`." >> "$GITHUB_STEP_SUMMARY"
+              fi
             fi
-          done < <(jq -r '.artifacts[] | select(.platform == "modrinth") | [.mode, .path] | @tsv' "$RUNNER_TEMP/pack-report.json")
+          # The default mode last, so that its version is always the newest.
+          done < <(jq -r --arg platform modrinth "$ARTIFACTS" "$RUNNER_TEMP/pack-report.json")
           exit "$failed"
 
       - name: Publish to CurseForge
@@ -314,8 +320,12 @@ jobs:
             else
               echo "::error::CurseForge refused $(basename "$path"): $(cat "$RUNNER_TEMP/curseforge-response.json" 2>/dev/null)"
               failed=1
+              if [[ "$mode" == default ]]; then
+                echo "- CurseForge: the default mode was not published, the other modes published before it are now the newest files; once fixed, publish it alone by running the workflow by hand from the tag with modes \`default\`." >> "$GITHUB_STEP_SUMMARY"
+              fi
             fi
-          done < <(jq -r '.artifacts[] | select(.platform == "curseforge") | [.mode, .path] | @tsv' "$RUNNER_TEMP/pack-report.json")
+          # The default mode last, so that its file is always the newest.
+          done < <(jq -r --arg platform curseforge "$ARTIFACTS" "$RUNNER_TEMP/pack-report.json")
           exit "$failed"
 
       - name: Report the packs that could not be built

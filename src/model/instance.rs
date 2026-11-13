@@ -94,7 +94,7 @@ impl InstanceState {
         super::parse_toml(
             &super::read_file(&path)?,
             &path.display().to_string(),
-            "delete the file, then load a variant with `modpack variant load <variant> --force`",
+            "if it records a `mode`, run `modpack update` to rename it; otherwise delete the file, then load a variant with `modpack variant load <variant> --force`",
         )
     }
 

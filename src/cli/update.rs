@@ -1,14 +1,19 @@
 //! `modpack update`: brings the repository's socle to this CLI's version.
 //!
-//! 1. Compares the repository's socle version to the CLI's; stops when equal,
-//!    unless `--force`.
-//! 2. Checks every file and block of the registry against its recorded hash;
+//! 1. Compares the repository's socle version to the CLI's; refuses a newer
+//!    repository.
+//! 2. Migrates a layout an older CLI wrote (`modes.toml` to `variants.toml`,
+//!    and the state of this machine's instance), whatever the version, so that
+//!    every machine of a pack can migrate its instance; then stops when the
+//!    versions are equal, unless `--force`.
+//! 3. Checks every file and block of the registry against its recorded hash;
 //!    stops on hand edits unless `--force`.
-//! 3. Writes the socle files and blocks, removes those that left the socle.
-//! 4. Rewrites the registry and the version.
+//! 4. Writes the socle files and blocks, removes those that left the socle.
+//! 5. Rewrites the registry and the version.
 
 use crate::context::Context;
 use crate::error::{Error, Result};
+use crate::model::instance::Instances;
 use crate::model::socle::{SocleConfig, SocleLock, VersionCheck, cli_version, compare_versions};
 use crate::socle;
 
@@ -24,18 +29,17 @@ pub fn run(args: Args, ctx: &Context) -> Result<()> {
     let mut config = SocleConfig::load(root)?;
     let cli = cli_version();
     let check = compare_versions(&config.version, &cli)?;
-    match check {
-        // `--force` rewrites the socle at the same version: a file deleted or
-        // edited by hand, or a broken registry.
-        VersionCheck::Equal if !args.force => {
-            println!("The socle is already at version {cli}: nothing to update.");
-            return Ok(());
-        }
-        VersionCheck::Equal => {}
-        VersionCheck::RepoNewer { .. } => {
-            check.enforce()?;
-        }
-        VersionCheck::RepoOlder { .. } => {}
+    if let VersionCheck::RepoNewer { .. } = check {
+        check.enforce()?;
+    }
+    for line in socle::migrate::run(root, &Instances::default_path()?)? {
+        println!("{line}");
+    }
+    // `--force` rewrites the socle at the same version: a file deleted or
+    // edited by hand, or a broken registry.
+    if matches!(check, VersionCheck::Equal) && !args.force {
+        println!("The socle is already at version {cli}: nothing to update.");
+        return Ok(());
     }
 
     let old = match SocleLock::load(root) {

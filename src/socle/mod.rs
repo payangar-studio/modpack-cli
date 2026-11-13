@@ -13,6 +13,7 @@
 //! no code change.
 
 pub mod blocks;
+pub mod migrate;
 
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -232,17 +232,23 @@ impl Modes {
         problems
     }
 
+    /// Fails with every inconsistency with the manifest, listed.
+    pub fn check(&self, manifest: &Manifest) -> Result<()> {
+        let problems = self.validate(manifest);
+        if problems.is_empty() {
+            return Ok(());
+        }
+        let list: Vec<String> = problems.iter().map(|p| format!("\n  - {p}")).collect();
+        Err(invalid(format!(
+            "inconsistent with mods.lock.toml:{}",
+            list.concat()
+        )))
+    }
+
     /// The mods and conditions of a mode. Fails on an unknown mode, or when
     /// the modes are inconsistent with the manifest.
     pub fn resolve(&self, mode: &str, manifest: &Manifest) -> Result<Resolved> {
-        let problems = self.validate(manifest);
-        if !problems.is_empty() {
-            let list: Vec<String> = problems.iter().map(|p| format!("\n  - {p}")).collect();
-            return Err(invalid(format!(
-                "inconsistent with mods.lock.toml:{}",
-                list.concat()
-            )));
-        }
+        self.check(manifest)?;
         let mut selection = self.default_selection(manifest);
         let own_conditions = if mode == DEFAULT_MODE {
             &self.default.conditions

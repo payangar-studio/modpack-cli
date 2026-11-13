@@ -510,3 +510,31 @@ fn loaded_mode_reads_the_instance_state() {
     fs::remove_dir_all(s.instance()).unwrap();
     assert_eq!(loaded(), None);
 }
+
+#[test]
+fn a_local_mod_is_copied_from_mods_local_into_the_instance_mods() {
+    let s = Setup::new();
+    let mut local = entry("custom", b"custom");
+    local.path = "mods-local/custom-1.0.0.jar".into();
+    local.source = Some(crate::model::manifest::Source::Local);
+    let path = s.root().join(manifest::FILE_NAME);
+    let mut m = Manifest::load(&path).unwrap();
+    m.upsert(local);
+    m.save(&path).unwrap();
+    write(s.root(), "mods-local/custom-1.0.0.jar", "custom");
+
+    let report = s.load(modes::DEFAULT_MODE, false).unwrap();
+    assert!(
+        report.copied.contains(&"mods/custom-1.0.0.jar".to_owned()),
+        "{:?}",
+        report.copied
+    );
+    assert_eq!(s.read("mods/custom-1.0.0.jar"), "custom");
+    assert!(!s.instance().join("mods-local").exists());
+
+    // Gone from mods-local/, it is not downloaded: git holds it.
+    fs::remove_file(s.instance().join("mods/custom-1.0.0.jar")).unwrap();
+    fs::remove_file(s.root().join("mods-local/custom-1.0.0.jar")).unwrap();
+    let err = s.load(modes::DEFAULT_MODE, true).unwrap_err();
+    assert!(err.to_string().contains("custom"), "{err}");
+}

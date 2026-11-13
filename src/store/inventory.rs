@@ -1,10 +1,10 @@
-//! What `mods/` holds, compared to the manifest.
+//! What `mods/` and `mods-local/` hold, compared to the manifest.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use super::hash::JarHashes;
-use super::{MODS_DIR, jars_in};
+use super::{MODS_DIR, jars_in, local_jars};
 use crate::error::Result;
 use crate::model::installed::Installed;
 use crate::model::manifest::Manifest;
@@ -18,20 +18,24 @@ pub struct Inventory {
     pub missing: Vec<String>,
     /// Keys of the entries whose jar is there with other hashes.
     pub mismatched: Vec<String>,
-    /// Jars of `mods/` no entry lists, as `mods/<name>`.
+    /// Jars of `mods/` and `mods-local/` no entry lists, as `mods/<name>` or
+    /// `mods-local/<name>`.
     pub unknown: Vec<String>,
     /// Jars the CLI downloaded that no entry lists any more, unchanged since,
     /// as `mods/<name>`: stale copies, never the user's.
     pub stale: Vec<String>,
-    /// Every jar found, as `mods/<name>`, with its hashes.
+    /// Every jar found, as `mods/<name>` or `mods-local/<name>`, with its
+    /// hashes.
     pub jars: BTreeMap<String, JarHashes>,
 }
 
-/// Hashes every jar of `<root>/mods/` and sorts the manifest's entries by
-/// what was found, telling the jars the CLI downloaded (see
-/// [`Installed`]) from the user's. A missing `mods/` is an empty stock.
+/// Hashes every jar of `<root>/mods/` and `<root>/mods-local/` and sorts the
+/// manifest's entries by what was found, telling the jars the CLI downloaded
+/// (see [`Installed`]) from the user's. A missing directory is an empty
+/// stock. The CLI never downloads into `mods-local/`: its jars are the user's.
 pub fn inventory(root: &Path, manifest: &Manifest) -> Result<Inventory> {
-    let jars = jars_in(&root.join(MODS_DIR))?;
+    let mut jars = jars_in(&root.join(MODS_DIR))?;
+    jars.extend(local_jars(root)?);
     let installed = Installed::load(root)?;
     let placed = |path: &str, found: &JarHashes| installed.placed(path, &found.sha1);
 
@@ -89,6 +93,23 @@ mod tests {
         assert_eq!(inv.unknown, ["mods/tried-in-the-app.jar"]);
         assert_eq!(inv.jars.len(), 3);
         assert_eq!(inv.jars["mods/jei-1.0.0.jar"].size, 3);
+    }
+
+    #[test]
+    fn local_jars_are_compared_to_local_entries() {
+        let root = tempfile::tempdir().unwrap();
+        let local = root.path().join("mods-local");
+        fs::create_dir_all(&local).unwrap();
+        fs::write(local.join("custom-1.0.0.jar"), b"custom").unwrap();
+        fs::write(local.join("dropped.jar"), b"new").unwrap();
+        let mut custom = entry("custom", b"custom");
+        custom.path = "mods-local/custom-1.0.0.jar".into();
+        custom.source = Some(crate::model::manifest::Source::Local);
+
+        let inv = inventory(root.path(), &manifest(vec![custom])).unwrap();
+        assert_eq!(inv.present, ["custom"]);
+        assert_eq!(inv.unknown, ["mods-local/dropped.jar"]);
+        assert!(inv.stale.is_empty());
     }
 
     #[test]

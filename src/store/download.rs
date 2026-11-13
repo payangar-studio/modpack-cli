@@ -138,6 +138,21 @@ pub fn download(root: &Path, entry: &Entry, sources: Sources<'_>) -> Result<(), 
         return Ok(());
     }
 
+    if attempts.is_empty() && entry.is_local() {
+        attempts.push(Attempt {
+            source: "git".into(),
+            error: Error::usage(
+                format!(
+                    "`{}` is a local mod and its jar {} is missing; git tracks it, nothing downloads it",
+                    entry.key, entry.path
+                ),
+                format!(
+                    "restore it with `git checkout -- {}`, or take the mod out with `modpack remove {}`",
+                    entry.path, entry.key
+                ),
+            ),
+        });
+    }
     if attempts.is_empty() {
         attempts.push(Attempt {
             source: "manifest".into(),
@@ -230,6 +245,8 @@ pub(crate) mod tests {
             file_size: hashes.size,
             downloads: Vec::new(),
             url: None,
+            source: None,
+            approved: None,
             hashes: Hashes {
                 sha1: hashes.sha1,
                 sha512: hashes.sha512,

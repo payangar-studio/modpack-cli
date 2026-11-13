@@ -1,5 +1,6 @@
 //! The repository's `mods/` directory seen as a stock of jars: what is there,
-//! how it compares to the manifest, and how to fetch what is missing.
+//! how it compares to the manifest, and how to fetch what is missing. Local
+//! mods sit apart, in `mods-local/`, tracked by git.
 
 pub mod download;
 pub mod hash;
@@ -17,20 +18,31 @@ use hash::{JarHashes, hash_file};
 /// Directory of the jars, relative to the repository root.
 pub const MODS_DIR: &str = "mods";
 
-/// Where the jar of an entry lives under `root`.
+/// Directory of the local mods' jars, tracked by git, relative to the
+/// repository root.
+pub const LOCAL_DIR: &str = "mods-local";
+
+/// Where the jar of an entry lives under `root`: `mods/`, or `mods-local/`
+/// for a local mod.
 ///
 /// The manifest is generated but stays a file anyone can edit: a path that is
-/// not a plain file name directly under `mods/` is refused rather than written.
+/// not a plain file name directly under that directory is refused rather than
+/// written.
 pub fn jar_path(root: &Path, entry: &Entry) -> Result<PathBuf> {
+    let dir = if entry.is_local() {
+        LOCAL_DIR
+    } else {
+        MODS_DIR
+    };
     let name = entry
         .path
-        .strip_prefix(MODS_DIR)
+        .strip_prefix(dir)
         .and_then(|rest| rest.strip_prefix('/'))
         .filter(|name| is_plain_file_name(name))
         .ok_or_else(|| {
             Error::usage(
                 format!(
-                    "{} gives `{}` the path `{}`, which is not a file directly under {MODS_DIR}/",
+                    "{} gives `{}` the path `{}`, which is not a file directly under {dir}/",
                     manifest::FILE_NAME,
                     entry.key,
                     entry.path
@@ -38,12 +50,21 @@ pub fn jar_path(root: &Path, entry: &Entry) -> Result<PathBuf> {
                 format!("regenerate {} with `modpack manifest`", manifest::FILE_NAME),
             )
         })?;
-    Ok(root.join(MODS_DIR).join(name))
+    Ok(root.join(dir).join(name))
 }
 
 /// Every `.jar` file directly under `dir`, a `mods/` directory, as
 /// `mods/<name>` with its hashes. A missing directory holds none.
 pub fn jars_in(dir: &Path) -> Result<BTreeMap<String, JarHashes>> {
+    list_jars(dir, MODS_DIR)
+}
+
+/// Every jar of `<root>/mods-local/`, as `mods-local/<name>` with its hashes.
+pub fn local_jars(root: &Path) -> Result<BTreeMap<String, JarHashes>> {
+    list_jars(&root.join(LOCAL_DIR), LOCAL_DIR)
+}
+
+fn list_jars(dir: &Path, prefix: &str) -> Result<BTreeMap<String, JarHashes>> {
     let listing = match fs::read_dir(dir) {
         Ok(listing) => listing,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
@@ -58,7 +79,7 @@ pub fn jars_in(dir: &Path) -> Result<BTreeMap<String, JarHashes>> {
         }
         let hashes =
             hash_file(&item.path()).context(format!("reading {}", item.path().display()))?;
-        jars.insert(format!("{MODS_DIR}/{name}"), hashes);
+        jars.insert(format!("{prefix}/{name}"), hashes);
     }
     Ok(jars)
 }
@@ -116,5 +137,14 @@ mod tests {
             entry.path = bad.into();
             assert!(jar_path(root, &entry).is_err(), "{bad} accepted");
         }
+
+        entry.source = Some(crate::model::manifest::Source::Local);
+        entry.path = "mods-local/custom.jar".into();
+        assert_eq!(
+            jar_path(root, &entry).unwrap(),
+            root.join("mods-local").join("custom.jar")
+        );
+        entry.path = "mods/custom.jar".into();
+        assert!(jar_path(root, &entry).is_err());
     }
 }

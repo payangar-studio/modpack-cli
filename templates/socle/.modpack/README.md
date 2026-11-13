@@ -7,7 +7,7 @@ This directory belongs to the socle of the modpack, managed by `modpack-cli`.
 - **Socle files**: everything in `.modpack/` but `local/`, the skills in `.claude/skills/modpack-*/` and the workflows in `.github/workflows/modpack-*.yml`. `modpack update` rewrites them.
 - **Mixed files**: `AGENTS.md` and `.gitignore`. The socle owns the block between its `modpack:begin` and `modpack:end` markers; the rest of the file belongs to the pack.
 - **Machine state**: `.modpack/local/`, ignored by git. `installed.toml` records the jars `modpack install` downloaded into `mods/`, so that it removes them once the manifest drops them and `modpack manifest` never adds them back.
-- **Pack content**: `mods.lock.toml`, `mods/`, `config/`, `modes.toml`, `overrides/` and the page. The socle never touches them after `modpack init`.
+- **Pack content**: `mods.lock.toml`, `mods/`, `mods-local/`, `config/`, `modes.toml`, `overrides/` and the page. The socle never touches them after `modpack init`.
 
 ## Updating
 

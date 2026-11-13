@@ -145,7 +145,7 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
     }
     let mut to_copy = Vec::new();
     for entry in wanted.iter().filter(|e| !present.contains(e.key.as_str())) {
-        to_copy.push((jar_path(root, entry)?, entry.path.clone()));
+        to_copy.push((jar_path(root, entry)?, entry.instance_path()));
     }
 
     // A foreign file where a jar of the mode goes is never overwritten silently.
@@ -295,8 +295,9 @@ fn find_instance(root: &Path, instances_file: &Path) -> Result<PathBuf> {
     })
 }
 
-/// Makes sure the repository's `mods/` holds every jar of the mode, with the
-/// manifest's hashes, downloading the missing ones. Returns their keys.
+/// Makes sure the repository holds every jar of the mode, with the
+/// manifest's hashes, downloading the missing ones into `mods/`. Returns their
+/// keys. A local mod's jar is never downloaded: git holds it.
 fn fill_stock(
     root: &Path,
     manifest: &Manifest,

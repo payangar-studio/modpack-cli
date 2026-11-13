@@ -1,6 +1,7 @@
 //! The state of a pack on this machine, as `modpack status` reports it: socle
 //! version, the pack's instance, the mode loaded there, drift, jars unknown to
-//! the manifest, and how `mods/` of the repository compares to the manifest.
+//! the manifest, how `mods/` of the repository compares to the manifest, and
+//! the local mods with their approval.
 //!
 //! Computing it reads files only: nothing is written, nothing goes to the
 //! network. The JSON form is a contract, documented in `docs/status.md`.
@@ -14,6 +15,7 @@ use crate::error::Result;
 use crate::model::instance::{InstanceState, Instances, disabled_in_app, drift};
 use crate::model::manifest::{self, Manifest};
 use crate::model::socle::{SocleConfig, VersionCheck, cli_version, compare_versions};
+use crate::ops::local::{LocalMod, local_mods};
 use crate::store::inventory::inventory;
 use crate::store::{MODS_DIR, jars_in};
 
@@ -25,6 +27,9 @@ pub struct Status {
     /// Manifest entries whose jar is absent from `mods/` of the repository.
     pub missing_jars: Vec<Jar>,
     pub manifest: ManifestCheck,
+    /// Mods whose jar git tracks in `mods-local/`, and whether each is
+    /// approved for publication.
+    pub local_mods: Vec<LocalMod>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -79,7 +84,7 @@ pub struct Jar {
 pub struct ManifestCheck {
     /// Whether `new_jars` or `changed` is not empty.
     pub stale: bool,
-    /// Jars of `mods/` that no entry lists, as `mods/<name>`.
+    /// Jars of `mods/` and `mods-local/` that no entry lists.
     pub new_jars: Vec<String>,
     /// Entries whose jar is in `mods/` with other hashes.
     pub changed: Vec<Jar>,
@@ -127,6 +132,7 @@ pub fn status(root: &Path, instances_file: &Path) -> Result<Status> {
             new_jars: inv.unknown,
             changed,
         },
+        local_mods: local_mods(root, &manifest)?,
     })
 }
 
@@ -227,6 +233,19 @@ impl Status {
         } else {
             writeln!(out, "manifest: up to date with mods/")?;
         }
+
+        let local: Vec<String> = self
+            .local_mods
+            .iter()
+            .map(|m| match m.approved {
+                true => format!("{} ({}), approved", m.key, m.path),
+                false => format!(
+                    "{} ({}), not approved: review it, then run `modpack approve {}`",
+                    m.key, m.path, m.key
+                ),
+            })
+            .collect();
+        list(out, "local mods, tracked by git in mods-local/", &local)?;
         Ok(())
     }
 }
@@ -469,6 +488,51 @@ mod tests {
             }]
         );
         assert!(text(&status).contains("manifest: stale; run `modpack manifest`"));
+    }
+
+    #[test]
+    fn local_mods_are_listed_with_their_approval() {
+        let setup = Setup::new();
+        setup.write_repo("mods-local/custom.jar", b"custom");
+        let path = setup.repo.path().join(manifest::FILE_NAME);
+        let mut m = Manifest::load(&path).unwrap();
+        let mut custom = entry("custom", b"custom");
+        custom.path = "mods-local/custom.jar".into();
+        custom.source = Some(crate::model::manifest::Source::Local);
+        m.upsert(custom);
+        m.save(&path).unwrap();
+
+        let status = setup.status();
+        assert!(!status.manifest.stale);
+        assert_eq!(
+            status.local_mods,
+            [LocalMod {
+                key: "custom".into(),
+                path: "mods-local/custom.jar".into(),
+                approved: false
+            }]
+        );
+        let out = text(&status);
+        assert!(
+            out.contains("local mods, tracked by git in mods-local/ (1):"),
+            "{out}"
+        );
+        assert!(
+            out.contains("not approved: review it, then run `modpack approve custom`"),
+            "{out}"
+        );
+        let (schema, _) = documented();
+        assert_valid(&schema, &serde_json::to_value(&status).unwrap());
+
+        let custom = m.get_mut("custom").unwrap();
+        custom.approved = Some(custom.hashes.sha512.clone());
+        m.save(&path).unwrap();
+        assert!(setup.status().local_mods[0].approved);
+        assert!(text(&setup.status()).contains("custom (mods-local/custom.jar), approved"));
+
+        // A jar dropped in mods-local/ makes the manifest stale.
+        setup.write_repo("mods-local/dropped.jar", b"new");
+        assert_eq!(setup.status().manifest.new_jars, ["mods-local/dropped.jar"]);
     }
 
     #[test]

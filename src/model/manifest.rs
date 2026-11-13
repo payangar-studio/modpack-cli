@@ -2,7 +2,8 @@
 //!
 //! Each entry is a superset of a `files[]` entry of a `.mrpack` (`path`,
 //! `hashes`, `fileSize`, `env`, `downloads`), plus the stable `key` modes refer
-//! to, an optional direct `url`, and one free table per platform. The core
+//! to, an optional direct `url`, the `source` of a local mod and its
+//! approval, and one free table per platform. The core
 //! stores platform tables without reading them; only the platform named by the
 //! table does.
 //!
@@ -60,6 +61,13 @@ pub struct Entry {
     /// Direct URL, last resort for a mod hosted on no platform.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// `local` for a jar tracked by git in `mods-local/`, at `path`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<Source>,
+    /// sha512 of the local jar `modpack approve` approved for publication.
+    /// The approval holds while it equals `hashes.sha512`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved: Option<String>,
     pub hashes: Hashes,
     #[serde(default)]
     pub env: Env,
@@ -67,6 +75,14 @@ pub struct Entry {
     /// platform's implementation.
     #[serde(flatten)]
     pub platforms: BTreeMap<String, toml::Table>,
+}
+
+/// Where the jar of a mod no platform hosts comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Source {
+    /// Tracked by git in the repository, under `mods-local/`.
+    Local,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -103,6 +119,27 @@ impl Entry {
     /// The table of a platform, created empty if missing.
     pub fn platform_mut(&mut self, name: &str) -> &mut toml::Table {
         self.platforms.entry(name.to_owned()).or_default()
+    }
+
+    /// Whether the jar is tracked by git in `mods-local/`.
+    pub fn is_local(&self) -> bool {
+        self.source == Some(Source::Local)
+    }
+
+    /// Whether a local mod's approval matches its jar as the manifest knows it.
+    pub fn is_approved(&self) -> bool {
+        self.approved.as_deref() == Some(self.hashes.sha512.as_str())
+    }
+
+    /// File name of the jar.
+    pub fn file_name(&self) -> &str {
+        self.path.rsplit('/').next().unwrap_or(&self.path)
+    }
+
+    /// Where the jar goes in an instance or a pack: `mods/<file name>`, for a
+    /// local mod as for any other.
+    pub fn instance_path(&self) -> String {
+        format!("mods/{}", self.file_name())
     }
 }
 
@@ -251,6 +288,8 @@ mod tests {
             file_size: 42,
             downloads: vec![format!("https://cdn.example.org/{key}.jar")],
             url: None,
+            source: None,
+            approved: None,
             hashes: Hashes {
                 sha1: "a".repeat(40),
                 sha512: "b".repeat(128),
@@ -328,6 +367,31 @@ mod tests {
         assert!(text.contains("loader-version = \"21.1.77\""));
         assert!(text.contains("fileSize = 42"));
         assert!(!text.contains("url ="), "absent url is not written");
+    }
+
+    #[test]
+    fn local_entry_round_trips_with_its_source_and_approval() {
+        let mut manifest = Manifest::load(&fixture()).unwrap();
+        let mut local = entry("custom");
+        local.path = "mods-local/custom-1.0.jar".into();
+        local.downloads.clear();
+        local.source = Some(Source::Local);
+        local.approved = Some("b".repeat(128));
+        manifest.upsert(local);
+        let text = manifest.to_toml();
+        assert!(text.contains("source = \"local\"\n"), "{text}");
+        let custom = Manifest::parse(&text)
+            .unwrap()
+            .get("custom")
+            .unwrap()
+            .clone();
+        assert!(custom.is_local() && custom.is_approved());
+        assert_eq!(custom.instance_path(), "mods/custom-1.0.jar");
+
+        let mut changed = custom.clone();
+        changed.hashes.sha512 = "c".repeat(128);
+        assert!(!changed.is_approved());
+        assert!(!manifest.get("jei").unwrap().is_local());
     }
 
     #[test]

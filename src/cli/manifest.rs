@@ -1,4 +1,5 @@
-//! `modpack manifest`: adds the new jars of mods/ to the manifest, rebuilds
+//! `modpack manifest`: adds the new jars of mods/ and mods-local/ to the
+//! manifest, rebuilds
 //! the entries whose jar changed and links entries to the platforms that did
 //! not know them yet. A missing jar keeps its entry.
 //! Then checks `modes.toml` against the manifest, so that the `pre-commit`
@@ -53,7 +54,7 @@ fn update_or_check(args: Args, root: &Path) -> Result<()> {
         }
         return Err(Error::blocked(
             format!(
-                "{FILE_NAME} does not match mods/ ({} difference(s))",
+                "{FILE_NAME} does not match mods/ and mods-local/ ({} difference(s))",
                 gaps.len()
             ),
             format!("run `modpack manifest`, then commit {FILE_NAME}"),
@@ -87,8 +88,15 @@ fn update_or_check(args: Args, root: &Path) -> Result<()> {
     if !changes.unidentified.is_empty() {
         writeln!(
             out,
-            "warning: found on no platform, give their direct URL with `modpack add mods/<jar> --url <url>`: {}",
+            "warning: found on no platform, give their direct URL with `modpack add mods/<jar> --url <url>`, or move their jar to mods-local/ to track it with git: {}",
             changes.unidentified.join(", ")
+        )?;
+    }
+    if !changes.unapproved.is_empty() {
+        writeln!(
+            out,
+            "local mods not approved for publication, review each jar then run `modpack approve <key>`: {}",
+            changes.unapproved.join(", ")
         )?;
     }
     Ok(())

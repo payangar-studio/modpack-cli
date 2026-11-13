@@ -463,6 +463,57 @@ mod tests {
     }
 
     #[test]
+    fn a_local_mod_is_taken_from_mods_local_and_never_downloaded() {
+        let repo = Repo::new();
+        let path = repo.path(manifest::FILE_NAME);
+        let mut m = Manifest::load(&path).unwrap();
+        let mut custom = entry("custom", b"custom");
+        custom.path = "mods-local/custom.jar".into();
+        custom.source = Some(crate::model::manifest::Source::Local);
+        m.upsert(custom);
+        m.save(&path).unwrap();
+        fs::create_dir_all(repo.path("mods-local")).unwrap();
+        fs::write(repo.path("mods-local/custom.jar"), b"custom").unwrap();
+
+        let instance = repo.machine.path().join("profiles/Test Pack");
+        fs::create_dir_all(&instance).unwrap();
+        let mut instances = Instances::default();
+        instances.set(PACK, instance.clone());
+        instances.save(&repo.instances_file()).unwrap();
+        fs::write(repo.path("modes.toml"), "[default]\n").unwrap();
+        InstanceState {
+            mode: Some("default".into()),
+            ..Default::default()
+        }
+        .save(&instance)
+        .unwrap();
+
+        let (result, out) = repo.install(false);
+        result.unwrap();
+        assert!(
+            out.contains("jars: 1 present, 2 downloaded, 0 failed"),
+            "{out}"
+        );
+        assert_eq!(
+            fs::read(instance.join("mods/custom.jar")).unwrap(),
+            b"custom"
+        );
+        assert!(!repo.path("mods/custom.jar").exists());
+
+        fs::remove_file(repo.path("mods-local/custom.jar")).unwrap();
+        let (result, out) = repo.install_with(&NoFetch, false);
+        assert!(result.is_err());
+        assert!(
+            out.contains("failed: custom\n  from git: `custom` is a local mod"),
+            "{out}"
+        );
+        assert!(
+            out.contains("git checkout -- mods-local/custom.jar"),
+            "{out}"
+        );
+    }
+
+    #[test]
     fn repository_without_manifest_is_a_usage_error() {
         let repo = Repo::new();
         fs::remove_file(repo.path(manifest::FILE_NAME)).unwrap();

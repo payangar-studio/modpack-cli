@@ -3,6 +3,8 @@
 //! fake `modpack` that records its calls, so that they run without network.
 #![cfg(unix)]
 
+mod common;
+
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -31,8 +33,7 @@ impl Repo {
         let tmp = tempfile::tempdir().unwrap();
         let bin = tmp.path().join("bin");
         fs::create_dir_all(&bin).unwrap();
-        fs::write(bin.join("modpack"), FAKE_MODPACK).unwrap();
-        fs::set_permissions(bin.join("modpack"), fs::Permissions::from_mode(0o755)).unwrap();
+        common::write_executable(&bin.join("modpack"), FAKE_MODPACK);
         let repo = Self {
             root: tmp.path().join("pack"),
             tmp,
@@ -230,12 +231,10 @@ fn a_failed_install_leaves_the_merge_done() {
 
     let failing = repo.tmp.path().join("failing");
     fs::create_dir_all(&failing).unwrap();
-    fs::write(
-        failing.join("modpack"),
+    common::write_executable(
+        &failing.join("modpack"),
         "#!/bin/sh\necho 'error: drift' >&2\nexit 3\n",
-    )
-    .unwrap();
-    fs::set_permissions(failing.join("modpack"), fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let path = std::env::join_paths(
         std::iter::once(failing).chain(std::env::split_paths(&repo.path(false))),
     )

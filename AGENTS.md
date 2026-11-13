@@ -29,6 +29,7 @@ Each issue owns its command handler (`src/cli/<command>.rs`, including its `Args
 - Logs go to stderr through `tracing`; command output goes to stdout.
 - Machine locations (caches, data, config) come from the `directories` crate, never from hard-coded Linux paths, so that Windows follows without a rewrite.
 - User-facing messages are in English.
+- Until a modpack is published with this CLI, a format change (repository files, instance state) ships without migration or backward compatibility; migrate the test pack by hand.
 
 ## Tests
 

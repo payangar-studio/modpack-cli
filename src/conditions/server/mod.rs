@@ -80,8 +80,17 @@ pub fn server_starts(
             loader::SUPPORTED
         ));
     };
+    let have = match java::major_version(&machine.java) {
+        Ok(Some(have)) => have,
+        Ok(None) => {
+            return Status::Skipped(format!(
+                "no Java found (`{}`); set JAVA_HOME or put java on the PATH to run this check",
+                machine.java.display()
+            ));
+        }
+        Err(reason) => return Status::Failed(reason),
+    };
     let start = || -> Step<Status> {
-        let have = java::major_version(&machine.java)?;
         let server = installed(loader, pack, have, machine)?;
         let run_dir = prepare(root, manifest, mode, &server, machine)?;
         let mut command = Command::new(&machine.java);

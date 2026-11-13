@@ -1,5 +1,6 @@
 //! The Java that runs the server: its version, and the version Minecraft needs.
 
+use std::io::ErrorKind;
 use std::path::Path;
 use std::process::Command;
 
@@ -11,21 +12,26 @@ use crate::store::download::Fetch;
 /// Mojang's list of Minecraft versions, each pointing to its version file.
 pub const MOJANG_VERSIONS: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 
-/// Major version of the Java at `java`, from `java -version`.
-pub fn major_version(java: &Path) -> Step<u32> {
-    let output = Command::new(java).arg("-version").output().map_err(|e| {
-        format!(
-            "cannot run Java (`{}`): {e}; set JAVA_HOME or put java on the PATH",
-            java.display()
-        )
-    })?;
+/// Major version of the Java at `java`, from `java -version`; `None` when
+/// there is no Java there.
+pub fn major_version(java: &Path) -> Step<Option<u32>> {
+    let output = match Command::new(java).arg("-version").output() {
+        Ok(output) => output,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(format!(
+                "cannot run Java (`{}`): {e}; set JAVA_HOME or put java on the PATH",
+                java.display()
+            ));
+        }
+    };
     // `java -version` writes to stderr.
     let text = format!(
         "{}{}",
         String::from_utf8_lossy(&output.stderr),
         String::from_utf8_lossy(&output.stdout)
     );
-    parse_version(&text).ok_or_else(|| {
+    parse_version(&text).map(Some).ok_or_else(|| {
         format!(
             "cannot read the version of Java (`{}`) from `java -version`: {}",
             java.display(),
@@ -111,9 +117,11 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn missing_java_says_how_to_point_to_one() {
-        let reason = major_version(Path::new("/nonexistent/modpack-test/java")).unwrap_err();
-        assert!(reason.contains("set JAVA_HOME"), "{reason}");
+    fn missing_java_has_no_version() {
+        assert_eq!(
+            major_version(Path::new("/nonexistent/modpack-test/java")),
+            Ok(None)
+        );
     }
 
     pub(in crate::conditions) fn mojang(fetch: MapFetch, minecraft: &str, java: u32) -> MapFetch {

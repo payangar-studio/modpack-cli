@@ -54,15 +54,20 @@ fn other_loaders_are_skipped_with_the_reason() {
 }
 
 #[test]
-fn missing_java_fails_and_says_how_to_point_to_one() {
-    let reason = failure(server_starts(
+fn missing_java_is_skipped_and_says_how_to_point_to_one() {
+    let status = server_starts(
         Path::new("."),
         &pack_manifest("fabric", "0.16.9"),
         &mode(&[]),
         Duration::from_secs(1),
         &machine_without_network(),
-    ));
-    assert!(reason.contains("set JAVA_HOME"), "{reason}");
+    );
+    assert_eq!(status.name(), "skipped");
+    let reason = status.reason().unwrap();
+    assert!(
+        reason.starts_with("no Java found") && reason.contains("set JAVA_HOME"),
+        "{reason}"
+    );
 }
 
 #[test]

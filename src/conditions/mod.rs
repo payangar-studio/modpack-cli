@@ -3,8 +3,9 @@
 //!
 //! Each check gives a [`Status`]: passed, failed with the reason, or skipped
 //! with the reason. A check never returns an error: whatever goes wrong while
-//! checking (a missing jar, Java not found, a download that fails) is the
-//! reason of a failure, so that one condition never hides the others.
+//! checking (a missing jar, a download that fails) is the reason of a failure,
+//! so that one condition never hides the others. What the machine lacks to
+//! run a check at all (no Java for `server-starts`) skips it, with the reason.
 
 pub mod server;
 mod statics;

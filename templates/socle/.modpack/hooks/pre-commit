@@ -1,0 +1,16 @@
+#!/bin/sh
+# Managed by modpack-cli; `modpack update` rewrites this file.
+# Regenerates mods.lock.toml from mods/ and adds it to the commit, so that no
+# commit leaves with a stale list of mods.
+
+if ! command -v modpack >/dev/null 2>&1; then
+    echo "modpack-cli: modpack is not in PATH, mods.lock.toml was not regenerated; install modpack-cli, then run \`modpack manifest\`." >&2
+    exit 0
+fi
+
+if ! modpack manifest </dev/null; then
+    echo "modpack-cli: \`modpack manifest\` failed, the commit is stopped; fix the problem above, or commit with --no-verify to skip this check." >&2
+    exit 1
+fi
+
+git add -- mods.lock.toml

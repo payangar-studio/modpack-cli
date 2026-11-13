@@ -42,7 +42,8 @@ pub fn run(args: Args, ctx: &Context) -> Result<()> {
 }
 
 /// The command, with its sources and the machine's instances file given.
-fn install(
+/// Also step 2 of `modpack setup`.
+pub(crate) fn install(
     root: &Path,
     sources: Sources<'_>,
     force: bool,

@@ -16,7 +16,9 @@ if ! modpack manifest </dev/null; then
     exit 1
 fi
 
+# New and changed jars only: a jar deleted by hand keeps its entry, so its
+# deletion is not committed; `modpack remove` stages it.
 if [ -d mods-local ]; then
-    git add -A -- mods-local || exit 1
+    git add --ignore-removal -- mods-local || exit 1
 fi
 git add -- mods.lock.toml

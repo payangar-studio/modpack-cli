@@ -37,9 +37,7 @@ impl Draft {
     /// A draft for the jar at `path` (`mods/<name>`, or `mods-local/<name>`
     /// for a local mod), from its hashes.
     pub fn from_hashes(path: &str, hashes: &JarHashes, key: Option<String>) -> Self {
-        let local = path
-            .strip_prefix(LOCAL_DIR)
-            .is_some_and(|rest| rest.starts_with('/'));
+        let local = is_local_path(path);
         Self {
             entry: Entry {
                 key: key.clone().unwrap_or_else(|| file_name(path).to_owned()),
@@ -215,8 +213,15 @@ pub fn regenerate(root: &Path, registry: &Registry) -> Result<Changes> {
         drafts.push(Draft::from_hashes(&jar, &inv.jars[&jar], Some(key.clone())));
     }
     for jar in &inv.unknown {
-        drafts.push(Draft::from_hashes(jar, &inv.jars[jar], None));
+        drafts.push(Draft::from_hashes(
+            jar,
+            &inv.jars[jar],
+            moved_key(&manifest, &inv.missing, jar, &inv.jars[jar]),
+        ));
     }
+    changes
+        .missing
+        .retain(|k| !drafts.iter().any(|d| d.key.as_ref() == Some(k)));
     changes.warnings = complete(root, &mut drafts, registry);
     for draft in drafts {
         let rebuilt = draft.key.is_some();
@@ -239,6 +244,25 @@ pub fn regenerate(root: &Path, registry: &Registry) -> Result<Changes> {
         manifest.save(&path)?;
     }
     Ok(changes)
+}
+
+/// The key of the entry a new jar of `mods-local/` was moved from: a missing
+/// entry of `mods/` with the same sha512, which the local mod then replaces
+/// under its key instead of sitting beside it.
+fn moved_key(
+    manifest: &Manifest,
+    missing: &[String],
+    jar: &str,
+    hashes: &JarHashes,
+) -> Option<String> {
+    if !is_local_path(jar) {
+        return None;
+    }
+    missing
+        .iter()
+        .filter_map(|k| manifest.get(k))
+        .find(|e| !e.is_local() && e.hashes.sha512 == hashes.sha512)
+        .map(|e| e.key.clone())
 }
 
 /// Asks each platform about the unchanged entries it has no table for, when
@@ -295,6 +319,12 @@ pub fn check(root: &Path) -> Result<Vec<String>> {
         format!("jar changed: {k} ({path})")
     }));
     Ok(gaps)
+}
+
+/// Whether `path` is under `mods-local/`.
+fn is_local_path(path: &str) -> bool {
+    path.strip_prefix(LOCAL_DIR)
+        .is_some_and(|rest| rest.starts_with('/'))
 }
 
 fn file_name(path: &str) -> &str {
@@ -549,6 +579,29 @@ pub(crate) mod tests {
         assert!(entry.platforms.is_empty() && entry.downloads.is_empty());
         assert_eq!(entry.file_size, 6);
         assert!(check(root.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_jar_moved_from_mods_to_mods_local_keeps_its_key() {
+        let root = repo();
+        fs::write(root.path().join("mods/by-hand.jar"), b"unknown").unwrap();
+        regenerate(root.path(), &registry()).unwrap();
+        assert!(!load(root.path()).get("by-hand").unwrap().is_local());
+
+        fs::create_dir_all(root.path().join("mods-local")).unwrap();
+        fs::rename(
+            root.path().join("mods/by-hand.jar"),
+            root.path().join("mods-local/by-hand.jar"),
+        )
+        .unwrap();
+        let changes = regenerate(root.path(), &registry()).unwrap();
+        assert_eq!(changes.rebuilt, ["by-hand"]);
+        assert!(changes.added.is_empty() && changes.missing.is_empty());
+        let manifest = load(root.path());
+        assert_eq!(manifest.mods.len(), 1);
+        let entry = manifest.get("by-hand").unwrap();
+        assert!(entry.is_local());
+        assert_eq!(entry.path, "mods-local/by-hand.jar");
     }
 
     #[test]

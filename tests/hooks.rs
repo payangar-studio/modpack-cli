@@ -296,4 +296,16 @@ fn offline_the_real_hook_commits_a_local_jar_and_its_entry() {
     assert!(manifest.contains("source = \"local\""), "{manifest}");
     assert!(manifest.contains("key = \"by-hand\""), "{manifest}");
     assert_eq!(repo.git(&["status", "--porcelain"]), "");
+
+    // A jar deleted by hand keeps its entry: the hook does not commit its
+    // deletion, which would leave the entry without a jar in git.
+    std::fs::remove_file(repo.root.join("mods-local/custom-tweaks-0.3.jar")).unwrap();
+    repo.write("config/b.toml", "b = 1\n");
+    repo.git(&["add", "config/b.toml"]);
+    let out = repo.run_git(&["commit", "--quiet", "-m", "config b"], offline);
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        repo.git(&["ls-files", "mods-local"]),
+        "mods-local/custom-tweaks-0.3.jar\n"
+    );
 }

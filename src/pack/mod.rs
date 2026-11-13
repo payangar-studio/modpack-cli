@@ -26,7 +26,7 @@ use crate::error::{Context, Error, Result};
 use crate::model::manifest::{self, Entry, Manifest, normalize_key};
 use crate::model::modes::{self, Modes};
 use crate::model::socle::SocleConfig;
-use crate::ops::local::{LocalMod, local_mods};
+use crate::ops::local::LocalMod;
 use crate::platform::{
     Capability, Eligibility, Operation, Override, PackBuild, Platform, Registry, unsupported,
 };
@@ -124,7 +124,9 @@ pub fn build(root: &Path, registry: &Registry, request: &Request<'_>) -> Result<
         local: Vec::new(),
         warnings: Vec::new(),
     };
-    let mut embedded = std::collections::BTreeSet::new();
+    // Local mods embedded so far, each jar checked once against the manifest.
+    let mut embedded: std::collections::BTreeMap<&str, (&Entry, PathBuf)> =
+        std::collections::BTreeMap::new();
     for mode in mode_names {
         let resolved = modes.resolve(mode, &manifest)?;
         let (local, mods): (Vec<&Entry>, Vec<&Entry>) = resolved
@@ -138,11 +140,15 @@ pub fn build(root: &Path, registry: &Registry, request: &Request<'_>) -> Result<
             .partition(|e| e.is_local());
         let mut overrides = Vec::new();
         for entry in local {
+            let source = match embedded.get(entry.key.as_str()) {
+                Some((_, jar)) => jar.clone(),
+                None => local_jar(root, entry)?,
+            };
+            embedded.insert(entry.key.as_str(), (entry, source.clone()));
             overrides.push(Override {
-                source: local_jar(root, entry)?,
+                source,
                 path: entry.instance_path(),
             });
-            embedded.insert(entry.key.as_str());
         }
         overrides.extend(base.iter().cloned());
         overrides.extend(config_files(
@@ -176,9 +182,15 @@ pub fn build(root: &Path, registry: &Registry, request: &Request<'_>) -> Result<
             });
         }
     }
-    report.local = local_mods(root, &manifest)?
-        .into_iter()
-        .filter(|m| embedded.contains(m.key.as_str()))
+    // `local_jar` checked each jar against the manifest's hash: the approval
+    // holds when it matches that hash.
+    report.local = embedded
+        .values()
+        .map(|(entry, _)| LocalMod {
+            key: entry.key.clone(),
+            path: entry.path.clone(),
+            approved: entry.is_approved(),
+        })
         .collect();
     report.warnings = local_warnings(&report.local, &platforms);
     Ok(report)

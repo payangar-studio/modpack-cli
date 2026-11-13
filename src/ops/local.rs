@@ -140,7 +140,22 @@ pub fn check_approved(root: &Path, out: &mut dyn Write) -> Result<()> {
         pending.len()
     );
     for m in &pending {
-        writeln!(out, "{}", m.todo())?;
+        // Not approved because the jar is absent, as in a checkout where it
+        // was never committed: approving would not help.
+        let missing = manifest
+            .get(&m.key)
+            .map(|e| jar_path(root, e))
+            .transpose()?
+            .is_some_and(|jar| !jar.is_file());
+        if missing {
+            writeln!(
+                out,
+                "`{}` ({}) has no jar in the repository: commit it, or take the mod out with `modpack remove {}`",
+                m.key, m.path, m.key
+            )?;
+        } else {
+            writeln!(out, "{}", m.todo())?;
+        }
         let _ = write!(what, "\n  - {} ({})", m.key, m.path);
     }
     Err(Error::blocked(
@@ -266,6 +281,13 @@ mod tests {
             String::from_utf8(out).unwrap(),
             "1 local mod(s), all approved\n"
         );
+
+        // A jar absent from the checkout is named as such, not as unreviewed.
+        fs::remove_file(root.path().join("mods-local/custom.jar")).unwrap();
+        let mut out = Vec::new();
+        check_approved(root.path(), &mut out).unwrap_err();
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains("has no jar in the repository"), "{out}");
     }
 
     #[test]

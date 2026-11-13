@@ -165,7 +165,9 @@ pub fn remove(root: &Path, key: &str, out: &mut dyn Write) -> Result<()> {
 /// else by project on the platform that resolves it. A failed lookup counts
 /// as not held: adding it then reports the failure.
 fn in_pack(sources: Sources<'_>, manifest: &Manifest, query: &str) -> Option<String> {
-    if manifest.get(query).is_some() {
+    // A local mod under that key is not held: adding it from a platform
+    // replaces it.
+    if manifest.get(query).is_some_and(|e| !e.is_local()) {
         return Some(query.to_owned());
     }
     let (platform, candidates) = resolve(sources, None, query, manifest).ok()?;
@@ -279,12 +281,17 @@ fn add_tracked(
     out: &mut dyn Write,
 ) -> Result<String> {
     let rel = format!("{LOCAL_DIR}/{name}");
-    let kept = manifest
-        .mods
-        .iter()
-        .find(|e| e.path == rel)
-        .map(|e| e.key.clone());
-    let key = Draft::from_jar(root, &rel, kept)?.commit(manifest, sources.registry);
+    let kept = manifest.mods.iter().find(|e| e.path == rel).cloned();
+    let mut draft = Draft::from_jar(root, &rel, kept.as_ref().map(|e| e.key.clone()))?;
+    // The same jar again keeps its approval: only a changed jar loses it.
+    if let Some(kept) = kept.filter(|e| e.hashes == draft.entry.hashes) {
+        draft.entry.approved = kept.approved;
+    }
+    let key = draft.commit(manifest, sources.registry);
+    if manifest.get(&key).is_some_and(Entry::is_approved) {
+        writeln!(out, "`{key}` ({rel}) is already a local mod, approved")?;
+        return Ok(key);
+    }
     writeln!(
         out,
         "added the local mod `{key}` ({rel}), tracked by git; review it, then run `modpack approve {key}` before publishing"
@@ -1135,6 +1142,30 @@ mod tests {
         assert!(sodium.platforms.is_empty());
         assert!(!root.path().join("mods/sodium-dev.jar").exists());
         assert!(crate::ops::manifest::check(root.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn adding_an_approved_local_jar_again_keeps_its_approval() {
+        let root = with_local_sodium();
+        crate::ops::local::approve(root.path(), "sodium", &mut Vec::new()).unwrap();
+        let jar = root.path().join("mods-local/sodium-dev.jar");
+        let (result, out) = run_add(root.path(), &registry(), &request(jar.to_str().unwrap()));
+        assert_eq!(result.unwrap(), "sodium");
+        assert!(out.contains("already a local mod, approved"), "{out}");
+        assert!(load(root.path()).get("sodium").unwrap().is_approved());
+    }
+
+    #[test]
+    fn adding_the_published_mod_with_deps_replaces_the_local_one() {
+        let root = with_local_sodium();
+        let req = AddRequest {
+            with_deps: true,
+            ..request("sodium")
+        };
+        let (result, out) = run_add(root.path(), &registry(), &req);
+        assert_eq!(result.unwrap(), "sodium");
+        assert!(out.contains("replaced the local mod `sodium`"), "{out}");
+        assert!(!load(root.path()).get("sodium").unwrap().is_local());
     }
 
     #[test]

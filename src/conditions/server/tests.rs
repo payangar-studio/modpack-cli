@@ -256,6 +256,22 @@ read cmd
     }
 
     #[test]
+    fn missing_local_jar_fails_and_points_to_git() {
+        let setup = Setup::new();
+        let java = setup.java(21, DONE);
+        let mut m = pack_manifest("fabric", "0.16.9");
+        let mut custom = entry("custom", b"custom");
+        custom.path = "mods-local/custom.jar".into();
+        custom.source = Some(crate::model::manifest::Source::Local);
+        m.upsert(custom);
+        let reason = failure(setup.check(java, &fabric_fetch(), &m, &["alpha", "custom"]));
+        assert_eq!(
+            reason,
+            "local jars missing from mods-local/: mods-local/custom.jar; restore them from git with `git checkout -- mods-local/custom.jar`"
+        );
+    }
+
+    #[test]
     fn client_only_mods_are_left_out_of_the_server() {
         let setup = Setup::new();
         let r = setup.repo.path();

@@ -12,6 +12,7 @@ use crate::mode::{self, LoadContext};
 use crate::model::installed::Installed;
 use crate::model::instance::Instances;
 use crate::model::manifest::{self, Entry, Manifest};
+use crate::ops::local::restore_hint;
 use crate::platform::Registry;
 use crate::store::download::{Failure, Http, Sources, download_all};
 use crate::store::inventory::{Inventory, inventory};
@@ -60,8 +61,15 @@ pub(crate) fn install(
         ));
     }
     let manifest = Manifest::load(&manifest_path)?;
-    let inv = inventory(root, &manifest)?;
+    let mut inv = inventory(root, &manifest)?;
     remove_stale(root, &inv)?;
+    // A changed jar of mods-local/ is never replaced, not even with --force:
+    // git holds it, nothing downloads it.
+    let (local_changed, mismatched): (Vec<String>, Vec<String>) = inv
+        .mismatched
+        .drain(..)
+        .partition(|k| manifest.get(k).is_some_and(Entry::is_local));
+    inv.mismatched = mismatched;
 
     let mut wanted: Vec<&Entry> = entries(&manifest, &inv.missing);
     if force {
@@ -106,6 +114,13 @@ pub(crate) fn install(
             inv.mismatched.join(", ")
         )?;
     }
+    if !local_changed.is_empty() {
+        writeln!(
+            out,
+            "local jar changed since the manifest, never replaced: {}",
+            local_changed.join(", ")
+        )?;
+    }
     if !inv.unknown.is_empty() {
         writeln!(
             out,
@@ -115,9 +130,22 @@ pub(crate) fn install(
     }
 
     if !failures.is_empty() {
+        let local: Vec<&Entry> = failures
+            .iter()
+            .filter_map(|f| manifest.get(&f.key))
+            .filter(|e| e.is_local())
+            .collect();
+        let hint = match (local.len(), failures.len()) {
+            (0, _) => "fix the causes listed above, then run `modpack install` again".to_owned(),
+            (l, n) if l == n => restore_hint(&local),
+            _ => format!(
+                "{}; fix the other causes listed above, then run `modpack install` again",
+                restore_hint(&local)
+            ),
+        };
         return Err(Error::internal(
             format!("{} jar(s) could not be downloaded", failures.len()),
-            "fix the causes listed above, then run `modpack install` again",
+            hint,
         ));
     }
     if !force && !inv.mismatched.is_empty() {
@@ -127,6 +155,19 @@ pub(crate) fn install(
                 inv.mismatched.len()
             ),
             "rerun with --force to replace them with the manifest's version, or run `modpack manifest` if you changed them on purpose",
+        ));
+    }
+    if !local_changed.is_empty() {
+        let changed = entries(&manifest, &local_changed);
+        return Err(Error::blocked(
+            format!(
+                "{} local jar(s) in mods-local/ differ from the manifest",
+                changed.len()
+            ),
+            format!(
+                "{}; run `modpack manifest` instead if you changed them on purpose",
+                restore_hint(&changed)
+            ),
         ));
     }
     let ctx = LoadContext {
@@ -510,6 +551,33 @@ mod tests {
         assert!(
             out.contains("git checkout -- mods-local/custom.jar"),
             "{out}"
+        );
+        let hint = result.unwrap_err().hint().to_owned();
+        assert!(
+            hint.contains("`git checkout -- mods-local/custom.jar`"),
+            "{hint}"
+        );
+        assert!(!hint.contains("modpack install"), "{hint}");
+
+        // Changed, it is never replaced, not even with --force.
+        fs::write(repo.path("mods-local/custom.jar"), b"edited").unwrap();
+        let (result, out) = repo.install_with(&NoFetch, true);
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Blocked);
+        assert!(
+            out.contains("local jar changed since the manifest, never replaced: custom"),
+            "{out}"
+        );
+        assert!(
+            err.hint()
+                .contains("`git checkout -- mods-local/custom.jar`"),
+            "{}",
+            err.hint()
+        );
+        assert!(!err.hint().contains("modpack install"), "{}", err.hint());
+        assert_eq!(
+            fs::read(repo.path("mods-local/custom.jar")).unwrap(),
+            b"edited"
         );
     }
 

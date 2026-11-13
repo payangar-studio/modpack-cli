@@ -10,7 +10,7 @@ The instance's `mods/` holds every jar by its file name, so a jar of `mods-local
 
 The entry has source `local`, its path in `mods-local/`, its hashes and size, and no download URL. No platform is asked about it, so a commit works offline. Its sides are `required` on both, as for any jar no platform describes. It stays in the one manifest that modes, `modpack test` and `modpack pack` read: modes name it by its key like any other mod.
 
-`modpack install` never downloads a local mod, git holds it; it reports the jar as failed when it is missing from `mods-local/`. `modpack mode load` (and the reload after `install`) copies it from `mods-local/` into the instance's `mods/`.
+`modpack install` never downloads a local mod, git holds it; it reports the jar as failed when it is missing from `mods-local/`, and never replaces it when it changed, even with `--force`. `modpack install`, `modpack mode load`, `modpack status`, `modpack manifest` and `modpack test` point such a jar to `git checkout -- mods-local/<jar>`, or to `modpack remove <key>`. `modpack mode load` (and the reload after `install`) copies it from `mods-local/` into the instance's `mods/`.
 
 A changed jar is rebuilt by `modpack manifest` under the same key, and loses its approval. `modpack remove <key>` takes the mod out of the pack and its jar out of git (`git rm`).
 

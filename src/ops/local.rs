@@ -164,6 +164,23 @@ pub fn check_approved(root: &Path, out: &mut dyn Write) -> Result<()> {
     ))
 }
 
+/// What to do about local mods whose jar is missing from `mods-local/` or
+/// changed: git holds those jars, nothing downloads them, so
+/// `modpack install` cannot help.
+pub fn restore_hint(entries: &[&Entry]) -> String {
+    let paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
+    match entries {
+        [entry] => format!(
+            "restore it from git with `git checkout -- {}`, or take the mod out with `modpack remove {}`",
+            entry.path, entry.key
+        ),
+        _ => format!(
+            "restore them from git with `git checkout -- {}`, or take each mod out with `modpack remove <key>`",
+            paths.join(" ")
+        ),
+    }
+}
+
 /// Whether git holds the jar of a local mod as committed: tracked, and the
 /// same in the working tree, the index and `HEAD`. Outside a git repository,
 /// or when git cannot run, it is not.

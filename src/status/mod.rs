@@ -17,7 +17,7 @@ use crate::model::manifest::{self, Manifest};
 use crate::model::socle::{SocleConfig, VersionCheck, cli_version, compare_versions};
 use crate::ops::local::{LocalMod, local_mods};
 use crate::store::inventory::inventory;
-use crate::store::{MODS_DIR, jars_in};
+use crate::store::{LOCAL_DIR, MODS_DIR, jars_in};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Status {
@@ -217,11 +217,33 @@ impl Status {
             }
         }
 
-        let missing: Vec<String> = self.missing_jars.iter().map(Jar::describe).collect();
+        // Git holds the jars of mods-local/: `modpack install` cannot restore
+        // them.
+        let (local_missing, missing): (Vec<&Jar>, Vec<&Jar>) = self
+            .missing_jars
+            .iter()
+            .partition(|j| j.path.starts_with(&format!("{LOCAL_DIR}/")));
+        let missing: Vec<String> = missing.into_iter().map(Jar::describe).collect();
         list(
             out,
             "jars missing from mods/, run `modpack install`",
             &missing,
+        )?;
+        let local_missing: Vec<String> = local_missing
+            .into_iter()
+            .map(|j| {
+                format!(
+                    "{}: restore it with `git checkout -- {}`, or take the mod out with `modpack remove {}`",
+                    j.describe(),
+                    j.path,
+                    j.key
+                )
+            })
+            .collect();
+        list(
+            out,
+            "local jars missing from mods-local/, held by git",
+            &local_missing,
         )?;
 
         let m = &self.manifest;
@@ -470,6 +492,25 @@ mod tests {
         );
         assert!(!status.manifest.stale);
         assert!(text(&status).contains("missing from mods/, run `modpack install`"));
+    }
+
+    #[test]
+    fn missing_local_jar_is_restored_from_git_not_installed() {
+        let setup = Setup::new();
+        let path = setup.repo.path().join(manifest::FILE_NAME);
+        let mut m = Manifest::load(&path).unwrap();
+        let mut custom = entry("custom", b"custom");
+        custom.path = "mods-local/custom.jar".into();
+        custom.source = Some(crate::model::manifest::Source::Local);
+        m.upsert(custom);
+        m.save(&path).unwrap();
+
+        let text = text(&setup.status());
+        assert!(
+            text.contains("local jars missing from mods-local/, held by git (1):\n  - custom (mods-local/custom.jar): restore it with `git checkout -- mods-local/custom.jar`, or take the mod out with `modpack remove custom`"),
+            "{text}"
+        );
+        assert!(!text.contains("modpack install"), "{text}");
     }
 
     #[test]

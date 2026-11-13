@@ -536,5 +536,27 @@ fn a_local_mod_is_copied_from_mods_local_into_the_instance_mods() {
     fs::remove_file(s.instance().join("mods/custom-1.0.0.jar")).unwrap();
     fs::remove_file(s.root().join("mods-local/custom-1.0.0.jar")).unwrap();
     let err = s.load(modes::DEFAULT_MODE, true).unwrap_err();
-    assert!(err.to_string().contains("custom"), "{err}");
+    assert_eq!(err.kind(), crate::error::ErrorKind::Blocked);
+    assert!(
+        err.to_string()
+            .contains("custom (mods-local/custom-1.0.0.jar), missing"),
+        "{err}"
+    );
+    assert!(
+        err.hint()
+            .contains("`git checkout -- mods-local/custom-1.0.0.jar`"),
+        "{}",
+        err.hint()
+    );
+    assert!(!err.hint().contains("modpack install"), "{}", err.hint());
+
+    // Changed, it is not restored by `modpack install --force` either.
+    write(s.root(), "mods-local/custom-1.0.0.jar", "edited");
+    let err = s.load(modes::DEFAULT_MODE, true).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("custom (mods-local/custom-1.0.0.jar), changed"),
+        "{err}"
+    );
+    assert!(!err.hint().contains("modpack install"), "{}", err.hint());
 }

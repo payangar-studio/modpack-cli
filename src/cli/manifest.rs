@@ -66,11 +66,28 @@ fn update_or_check(args: Args, root: &Path) -> Result<()> {
         writeln!(out, "warning: {warning}")?;
     }
     if !changes.missing.is_empty() {
-        writeln!(
-            out,
-            "warning: jar missing from mods/, entry kept (`modpack install` downloads it, `modpack remove <key>` removes the mod): {}",
-            changes.missing.join(", ")
-        )?;
+        // Git holds the jars of mods-local/: `modpack install` cannot restore
+        // them.
+        let manifest = Manifest::load(&root.join(FILE_NAME))?;
+        let (local, missing): (Vec<String>, Vec<String>) = changes
+            .missing
+            .iter()
+            .cloned()
+            .partition(|k| manifest.get(k).is_some_and(|e| e.is_local()));
+        if !missing.is_empty() {
+            writeln!(
+                out,
+                "warning: jar missing from mods/, entry kept (`modpack install` downloads it, `modpack remove <key>` removes the mod): {}",
+                missing.join(", ")
+            )?;
+        }
+        if !local.is_empty() {
+            writeln!(
+                out,
+                "warning: local jar missing from mods-local/, entry kept (`git checkout -- mods-local/<file>` restores it, `modpack remove <key>` removes the mod): {}",
+                local.join(", ")
+            )?;
+        }
     }
     if changes.is_empty() {
         writeln!(out, "{FILE_NAME} is up to date")?;

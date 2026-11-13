@@ -119,6 +119,31 @@ fn remove_cleans_the_manifest_mods_and_modes() {
 }
 
 #[test]
+fn manifest_points_a_missing_local_jar_to_git() {
+    let repo = repo();
+    let home = tempfile::tempdir().unwrap();
+    fs::remove_file(repo.path().join("mods/abc.jar")).unwrap();
+    fs::create_dir_all(repo.path().join("mods-local")).unwrap();
+    fs::write(repo.path().join("mods-local/custom.jar"), b"custom").unwrap();
+    modpack(repo.path(), home.path())
+        .arg("manifest")
+        .assert()
+        .success();
+    fs::remove_file(repo.path().join("mods-local/custom.jar")).unwrap();
+    modpack(repo.path(), home.path())
+        .arg("manifest")
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains(
+                "warning: local jar missing from mods-local/, entry kept (`git checkout -- mods-local/<file>` restores it, `modpack remove <key>` removes the mod): custom",
+            )
+            // The jar of mods/ only: `modpack install` cannot restore a local one.
+            .and(predicate::str::contains("removes the mod): abc\n")),
+        );
+}
+
+#[test]
 fn manifest_keeps_the_entry_of_a_missing_jar() {
     let repo = repo();
     let home = tempfile::tempdir().unwrap();

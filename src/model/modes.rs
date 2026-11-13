@@ -239,7 +239,7 @@ impl Modes {
         if !problems.is_empty() {
             let list: Vec<String> = problems.iter().map(|p| format!("\n  - {p}")).collect();
             return Err(invalid(format!(
-                "modes.toml does not match mods.lock.toml:{}",
+                "inconsistent with mods.lock.toml:{}",
                 list.concat()
             )));
         }
@@ -491,8 +491,11 @@ mod tests {
                 },
             ]
         );
-        let err = modes.resolve("a", &manifest()).unwrap_err();
-        assert!(err.to_string().contains("`ghost`"));
+        let err = modes.resolve("a", &manifest()).unwrap_err().to_string();
+        assert!(err.contains("`ghost`"));
+        assert!(err.starts_with("error: modes.toml: inconsistent with mods.lock.toml:"));
+        let first_line = err.lines().next().unwrap();
+        assert_eq!(first_line.matches("modes.toml").count(), 1, "{err}");
     }
 
     #[test]

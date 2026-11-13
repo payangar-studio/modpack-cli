@@ -1,0 +1,47 @@
+[package]
+name = "modpack-cli"
+version = "0.1.0"
+edition = "2024"
+description = "CLI of the Minecraft modpack socle"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "modpack"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+dialoguer = { version = "0.12.0", default-features = false, features = ["password"] }
+directories = "6.0.0"
+include_dir = "0.7.4"
+rusqlite = { version = "0.42.0", features = ["bundled"] }
+semver = "1.0.28"
+serde = { version = "1.0.229", features = ["derive"] }
+sha1 = "0.11.0"
+sha2 = "0.11.1"
+sysinfo = { version = "0.40.3", default-features = false, features = ["system"] }
+tempfile = "3.27.0"
+toml = "1.2.1"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+keyring-core = "1.0.1"
+serde_json = "1.0.154"
+ureq = { version = "3.5.2", features = ["json"] }
+zip = { version = "9.5.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+toml_edit = "0.25.19"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus-secret-service-keyring-store = { version = "1.0.1", features = ["crypto-rust"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-native-keyring-store = "1.1.0"
+
+[dev-dependencies]
+assert_cmd = "2.2.2"
+mockito = "1.7.2"
+predicates = "3.1.4"
+tempfile = "3.27.0"
+tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
+wiremock = "0.6.5"
+jsonschema = { version = "0.61.2", default-features = false }

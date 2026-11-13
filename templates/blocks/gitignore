@@ -1,0 +1,3 @@
+mods/*.jar
+.source/
+.modpack/local/

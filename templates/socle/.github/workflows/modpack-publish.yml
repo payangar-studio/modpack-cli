@@ -1,0 +1,48 @@
+# Managed by modpack-cli: `modpack update` rewrites this file.
+#
+# Publishes the pack to Modrinth and CurseForge when a v* tag is pushed on
+# main, through the shared workflow of modpack-cli. A platform that failed is
+# published again alone by running this workflow by hand from the tag.
+#
+# Repository variables (Settings, Secrets and variables, Actions, Variables):
+# - INFISICAL_URL: URL of the vault;
+# - INFISICAL_IDENTITY_ID: id of the vault identity `ci-minecraft`;
+# - MODPACK_PUBLISH_MODES (optional): modes to publish, separated by spaces;
+#   all modes when unset.
+
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: Platforms to publish to
+        type: choice
+        options: ["modrinth curseforge", "modrinth", "curseforge"]
+        default: "modrinth curseforge"
+      modes:
+        description: Modes to publish, separated by spaces (empty for MODPACK_PUBLISH_MODES, else all)
+        type: string
+        default: ""
+      dry-run:
+        description: Build the packs without publishing them
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  # The vault grants the secrets against the OIDC token of the tag.
+  id-token: write
+
+jobs:
+  publish:
+    uses: payangar-studio/modpack-cli/.github/workflows/publish-modpack.yml@v0.1.0
+    with:
+      modpack-version: v0.1.0
+      platforms: ${{ inputs.platforms || 'modrinth curseforge' }}
+      modes: ${{ inputs.modes || vars.MODPACK_PUBLISH_MODES }}
+      dry-run: ${{ inputs.dry-run == true }}
+      vault-url: ${{ vars.INFISICAL_URL }}
+      identity-id: ${{ vars.INFISICAL_IDENTITY_ID }}

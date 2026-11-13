@@ -1,0 +1,304 @@
+# Publishes a modpack repository's packs to Modrinth and CurseForge.
+#
+# Called on a tag by `.github/workflows/modpack-publish.yml`, which the socle
+# lays down in every modpack repository. Everything here runs in the context
+# of the calling repository: `github.*` is the pack's, the checkout is the
+# pack's, the OIDC token names the pack's repository and tag.
+#
+# Secrets come from the vault (Infisical) by OIDC, never from GitHub secrets.
+# The vault URL and the identity id are not secrets, but this repository is
+# public: the caller hands them over from its repository variables.
+
+name: Publish modpack
+
+on:
+  workflow_call:
+    inputs:
+      modpack-version:
+        description: Release of modpack-cli to run (v0.1.0), or `latest`
+        type: string
+        default: latest
+      modes:
+        description: Modes to publish, separated by spaces; empty for all
+        type: string
+        default: ""
+      platforms:
+        description: Platforms to publish to, separated by spaces
+        type: string
+        default: modrinth curseforge
+      dry-run:
+        description: Build the packs without reading the vault or publishing
+        type: boolean
+        default: false
+      modrinth-project:
+        description: Modrinth project id; empty for `[modrinth] project_id` of page/page.toml
+        type: string
+        default: ""
+      curseforge-project:
+        description: CurseForge project id; empty for `[curseforge] project_id` of page/page.toml
+        type: string
+        default: ""
+      vault-url:
+        description: URL of the Infisical vault (repository variable INFISICAL_URL)
+        type: string
+        default: ""
+      identity-id:
+        description: Id of the vault identity `ci-minecraft` (repository variable INFISICAL_IDENTITY_ID)
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  MODPACK_CLI_REPO: payangar-studio/modpack-cli
+  # Vault project and folder of the organization CI `ci-minecraft`.
+  VAULT_PROJECT: minecraft
+  VAULT_ENVIRONMENT: prod
+  VAULT_PATH: /app
+  USER_AGENT: payangar-studio/modpack-cli publish-workflow
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The whole history: the guard compares the tag with origin/main.
+          fetch-depth: 0
+
+      - name: Check that the tag is on main
+        env:
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          if [[ "$GITHUB_REF_TYPE" != tag ]]; then
+            if [[ "$DRY_RUN" == true ]]; then
+              echo "::notice::$GITHUB_REF is not a tag: dry run of version 0.0.0-dev."
+              echo "VERSION=0.0.0-dev" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            echo "::error::Publishing runs on a tag, and $GITHUB_REF is not one. Push a v* tag on main, or run the workflow from that tag."
+            exit 1
+          fi
+          # A guard against mistakes, not a security boundary: a tag on a work
+          # branch would publish a version nobody reviewed.
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME is not on main: its commit $GITHUB_SHA is not an ancestor of origin/main. Merge the work into main, then tag a commit of main."
+            exit 1
+          fi
+          # actions/checkout turns an annotated tag into a lightweight one:
+          # fetch it again to read its message.
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Install modpack
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WANTED: ${{ inputs.modpack-version }}
+        run: |
+          if [[ "$WANTED" == latest ]]; then
+            tag=$(gh release view -R "$MODPACK_CLI_REPO" --json tagName -q .tagName)
+          else
+            tag="v${WANTED#v}"
+          fi
+          dir="$RUNNER_TEMP/modpack-cli"
+          mkdir -p "$dir/bin"
+          gh release download "$tag" -R "$MODPACK_CLI_REPO" -D "$dir" \
+            -p "modpack-*-x86_64-unknown-linux-musl.tar.gz" \
+            -p "modpack-*-x86_64-unknown-linux-musl.tar.gz.sha256"
+          (cd "$dir" && sha256sum -c ./*.sha256)
+          tar -xzf "$dir"/*.tar.gz -C "$dir/bin"
+          echo "$dir/bin" >> "$GITHUB_PATH"
+          echo "Installed modpack $tag."
+
+      - name: Read the secrets from the vault
+        if: ${{ !inputs.dry-run }}
+        env:
+          VAULT_URL: ${{ inputs.vault-url }}
+          IDENTITY_ID: ${{ inputs.identity-id }}
+        run: |
+          if [[ -z "$VAULT_URL" || -z "$IDENTITY_ID" ]]; then
+            echo "::error::Set the repository variables INFISICAL_URL and INFISICAL_IDENTITY_ID (Settings, Secrets and variables, Actions, Variables), then run the workflow again from the tag."
+            exit 1
+          fi
+          vault="${VAULT_URL%/}"
+          audience="https://github.com/$GITHUB_REPOSITORY_OWNER"
+          jwt=$(curl -sS --fail -G -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            --data-urlencode "audience=$audience" "$ACTIONS_ID_TOKEN_REQUEST_URL" | jq -r .value) || {
+            echo "::error::GitHub gave no OIDC token: the calling workflow must grant \`id-token: write\`."
+            exit 1
+          }
+          echo "::add-mask::$jwt"
+          token=$(jq -n --arg identityId "$IDENTITY_ID" --arg jwt "$jwt" '{identityId: $identityId, jwt: $jwt}' |
+            curl -sS --fail -A "$USER_AGENT" -H "Content-Type: application/json" --data @- \
+              "$vault/api/v1/auth/oidc-auth/login" | jq -r .accessToken) || {
+            echo "::error::The vault refused the login of identity ci-minecraft for $GITHUB_REPOSITORY on $GITHUB_REF."
+            exit 1
+          }
+          echo "::add-mask::$token"
+          # Project slugs carry a random suffix: the project is found by name.
+          slug=$(curl -sS --fail -A "$USER_AGENT" -H "Authorization: Bearer $token" \
+            "$vault/api/v1/workspace" | jq -r --arg name "$VAULT_PROJECT" '.workspaces[] | select(.name == $name) | .slug')
+          if [[ -z "$slug" ]]; then
+            echo "::error::Vault project $VAULT_PROJECT is not visible to identity ci-minecraft."
+            exit 1
+          fi
+          secrets=$(curl -sS --fail -G -A "$USER_AGENT" -H "Authorization: Bearer $token" \
+            --data-urlencode "workspaceSlug=$slug" \
+            --data-urlencode "environment=$VAULT_ENVIRONMENT" \
+            --data-urlencode "secretPath=$VAULT_PATH" \
+            "$vault/api/v3/secrets/raw")
+          # Named like the variables the CLI reads. A missing one only fails
+          # the step that needs it.
+          for name in MODPACK_MODRINTH_TOKEN MODPACK_CURSEFORGE_UPLOAD_TOKEN; do
+            value=$(jq -r --arg name "$name" '.secrets[] | select(.secretKey == $name) | .secretValue' <<<"$secrets")
+            if [[ -n "$value" ]]; then
+              echo "::add-mask::$value"
+              echo "$name=$value" >> "$GITHUB_ENV"
+            else
+              echo "::warning::$name is not in $VAULT_PROJECT:$VAULT_PATH of the vault."
+            fi
+          done
+
+      # `pack` builds from the manifest, config and overrides alone: no jar is
+      # downloaded, so the CI needs no CurseForge API key.
+      - name: Build the packs
+        id: pack
+        env:
+          MODES: ${{ inputs.modes }}
+          PLATFORMS: ${{ inputs.platforms }}
+        run: |
+          read -ra modes <<<"$MODES"
+          read -ra platforms <<<"$PLATFORMS"
+          # Both platforms are what `pack` builds when given none.
+          platform_arg=()
+          if [[ ${#platforms[@]} -eq 1 ]]; then platform_arg=(--platform "${platforms[0]}"); fi
+          [[ ${#modes[@]} -gt 0 ]] || modes=("")
+          reports=()
+          for mode in "${modes[@]}"; do
+            report="$RUNNER_TEMP/pack-report-${#reports[@]}.json"
+            # A platform blocked for a mode exits non-zero but still reports
+            # what was built: the other packs are published, the job fails at
+            # the end.
+            modpack pack ${mode:+"$mode"} "${platform_arg[@]}" --out "$RUNNER_TEMP/dist" \
+              --pack-version "$VERSION" --json > "$report" || true
+            if ! jq -e .artifacts "$report" > /dev/null 2>&1; then
+              echo "::error::modpack pack ${mode:-(all modes)} built nothing, see its error above."
+              exit 1
+            fi
+            reports+=("$report")
+          done
+          jq -s '{artifacts: (map(.artifacts) | add), blocked: (map(.blocked) | add)}' "${reports[@]}" \
+            > "$RUNNER_TEMP/pack-report.json"
+          jq -r '.artifacts[] | "Built \(.path) (\(.platform), mode \(.mode))."' "$RUNNER_TEMP/pack-report.json"
+
+          # Changelog: changelogs/<version>.md, else the tag's message.
+          changelog="$RUNNER_TEMP/changelog.md"
+          if [[ -f "changelogs/$VERSION.md" ]]; then
+            cp "changelogs/$VERSION.md" "$changelog"
+          elif [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' "$GITHUB_REF_NAME" > "$changelog"
+          fi
+          [[ -s "$changelog" ]] || echo "Version $VERSION" > "$changelog"
+          # Release type from the version's suffix: 1.2.0, 1.2.0-beta.1, 1.2.0-alpha.1.
+          case "$VERSION" in
+            *-alpha*) echo "RELEASE_TYPE=alpha" >> "$GITHUB_ENV" ;;
+            *-*) echo "RELEASE_TYPE=beta" >> "$GITHUB_ENV" ;;
+            *) echo "RELEASE_TYPE=release" >> "$GITHUB_ENV" ;;
+          esac
+          python3 -c '
+          import tomllib
+          init = tomllib.load(open(".modpack/socle.toml", "rb"))["init"]
+          for variable, key in (("PACK_NAME", "name"), ("MINECRAFT", "minecraft"), ("LOADER", "loader")):
+              print(f"{variable}={init[key]}")
+          ' >> "$GITHUB_ENV"
+
+      - name: Keep the packs of a dry run
+        if: ${{ inputs.dry-run }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: packs
+          path: ${{ runner.temp }}/dist
+          retention-days: 7
+
+      - name: Publish to Modrinth
+        if: ${{ !cancelled() && !inputs.dry-run && steps.pack.outcome == 'success' && contains(inputs.platforms, 'modrinth') }}
+        env:
+          PROJECT: ${{ inputs.modrinth-project }}
+        run: |
+          project="${PROJECT:-$(python3 -c 'import pathlib, tomllib; p = pathlib.Path("page/page.toml"); print(tomllib.loads(p.read_text()).get("modrinth", {}).get("project_id", "") if p.exists() else "")')}"
+          if [[ -z "$project" ]]; then
+            echo "::error::No Modrinth project: run \`modpack page push\` to create it, which writes [modrinth] project_id in page/page.toml."
+            exit 1
+          fi
+          if [[ -z "${MODPACK_MODRINTH_TOKEN:-}" ]]; then
+            echo "::error::MODPACK_MODRINTH_TOKEN is missing from $VAULT_PROJECT:$VAULT_PATH in the vault."
+            exit 1
+          fi
+          failed=0
+          while IFS=$'\t' read -r mode path; do
+            # The default mode is the pack itself; another mode is told apart
+            # by its name.
+            number="$VERSION" name="$PACK_NAME $VERSION"
+            if [[ "$mode" != default ]]; then number="$VERSION+$mode" name="$name ($mode)"; fi
+            data="$RUNNER_TEMP/modrinth-data.json"
+            jq -n --arg project "$project" --arg name "$name" --arg number "$number" \
+              --rawfile changelog "$RUNNER_TEMP/changelog.md" --arg type "$RELEASE_TYPE" \
+              --arg mc "$MINECRAFT" --arg loader "$LOADER" \
+              '{project_id: $project, name: $name, version_number: $number, changelog: $changelog,
+                version_type: $type, game_versions: [$mc], loaders: [$loader], dependencies: [],
+                featured: false, file_parts: ["file"], primary_file: "file"}' > "$data"
+            if curl -sS --fail-with-body -A "$USER_AGENT" -H "Authorization: $MODPACK_MODRINTH_TOKEN" \
+                -F "data=<$data;type=application/json" -F "file=@$path" \
+                https://api.modrinth.com/v2/version -o "$RUNNER_TEMP/modrinth-response.json"; then
+              echo "Published $number to Modrinth (version $(jq -r .id "$RUNNER_TEMP/modrinth-response.json"))."
+            else
+              echo "::error::Modrinth refused $(basename "$path"): $(cat "$RUNNER_TEMP/modrinth-response.json" 2>/dev/null)"
+              failed=1
+            fi
+          done < <(jq -r '.artifacts[] | select(.platform == "modrinth") | [.mode, .path] | @tsv' "$RUNNER_TEMP/pack-report.json")
+          exit "$failed"
+
+      - name: Publish to CurseForge
+        if: ${{ !cancelled() && !inputs.dry-run && steps.pack.outcome == 'success' && contains(inputs.platforms, 'curseforge') }}
+        env:
+          PROJECT: ${{ inputs.curseforge-project }}
+        run: |
+          project="${PROJECT:-$(python3 -c 'import pathlib, tomllib; p = pathlib.Path("page/page.toml"); print(tomllib.loads(p.read_text()).get("curseforge", {}).get("project_id", "") if p.exists() else "")')}"
+          if [[ -z "$project" ]]; then
+            echo "::error::No CurseForge project: create it with the modpack-curseforge-page skill, which writes [curseforge] project_id in page/page.toml."
+            exit 1
+          fi
+          if [[ -z "${MODPACK_CURSEFORGE_UPLOAD_TOKEN:-}" ]]; then
+            echo "::error::MODPACK_CURSEFORGE_UPLOAD_TOKEN is missing from $VAULT_PROJECT:$VAULT_PATH in the vault."
+            exit 1
+          fi
+          failed=0
+          while IFS=$'\t' read -r mode path; do
+            name="$PACK_NAME $VERSION"
+            if [[ "$mode" != default ]]; then name="$name ($mode)"; fi
+            # No gameVersions: CurseForge reads them from the pack's manifest.json.
+            metadata="$RUNNER_TEMP/curseforge-metadata.json"
+            jq -n --arg name "$name" --rawfile changelog "$RUNNER_TEMP/changelog.md" --arg type "$RELEASE_TYPE" \
+              '{displayName: $name, changelog: $changelog, changelogType: "markdown", releaseType: $type}' > "$metadata"
+            if curl -sS --fail-with-body -A "$USER_AGENT" -H "X-Api-Token: $MODPACK_CURSEFORGE_UPLOAD_TOKEN" \
+                -F "metadata=<$metadata;type=application/json" -F "file=@$path" \
+                "https://minecraft.curseforge.com/api/projects/$project/upload-file" \
+                -o "$RUNNER_TEMP/curseforge-response.json"; then
+              echo "Published $name to CurseForge (file $(jq -r .id "$RUNNER_TEMP/curseforge-response.json"))."
+            else
+              echo "::error::CurseForge refused $(basename "$path"): $(cat "$RUNNER_TEMP/curseforge-response.json" 2>/dev/null)"
+              failed=1
+            fi
+          done < <(jq -r '.artifacts[] | select(.platform == "curseforge") | [.mode, .path] | @tsv' "$RUNNER_TEMP/pack-report.json")
+          exit "$failed"
+
+      - name: Report the packs that could not be built
+        if: ${{ !cancelled() && steps.pack.outcome == 'success' }}
+        run: |
+          blocked=$(jq -r '.blocked[] | "\(.platform) pack of mode \(.mode): \(.mods | map(.key) | join(", "))"' "$RUNNER_TEMP/pack-report.json")
+          if [[ -n "$blocked" ]]; then
+            while read -r line; do echo "::error::Not built, $line. Leave these mods out of the mode in modes.toml."; done <<<"$blocked"
+            exit 1
+          fi

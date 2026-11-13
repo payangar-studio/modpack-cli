@@ -1,0 +1,15 @@
+#!/bin/sh
+# Managed by modpack-cli; `modpack update` rewrites this file.
+# After a merge or a pull: downloads the missing jars and reloads the mode
+# loaded in the pack's instance. The merge is done and stays done: when the
+# CLI stops (a file of the instance changed, for instance), its message says
+# why and the instance is left as it is.
+
+if ! command -v modpack >/dev/null 2>&1; then
+    echo "modpack-cli: modpack is not in PATH, the instance was not updated; install modpack-cli, then run \`modpack install\`." >&2
+    exit 0
+fi
+
+modpack install </dev/null ||
+    echo "modpack-cli: the instance was left as it is; fix the problem above, then run \`modpack install\`." >&2
+exit 0

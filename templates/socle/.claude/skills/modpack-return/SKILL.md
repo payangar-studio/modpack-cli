@@ -123,8 +123,8 @@ Ask the user which proposals to apply, with AskUserQuestion when there are few c
 
 - **Integrate an unknown jar**:
   ```bash
-  modpack add "<instance.path>/<path>"                                 # every variant
-  modpack add "<instance.path>/<path>" --variant default --variant <variant>    # these variants only
+  modpack add "<instance.path>/<path>"                                            # every variant
+  modpack add "<instance.path>/<path>" --variant default --variant <variant>      # these variants only
   ```
   `--variant` repeats, once per variant the mod goes into; `default` names the default variant. Without `default`, the default variant removes the mod and each named variant adds it. With `default`, every variant not named removes it: a client-only mod in a pack with `default` (`side = "client"`) and `server` (`side = "server"`) goes in with `--variant default`. Add `--with-deps` when the user wants the missing required dependencies too, which go into the same variants; without it, the command only lists them. A jar on no platform needs its direct download URL: `--url <url>`, from the user or the mod's official release page, never guessed.
 - **Update a mod the pack has to the version tried in the instance**: when it is on Modrinth, `modpack add <project_id> --version <version_id>` replaces it under its key and keeps it in its variants. A local jar added with `modpack add <jar>` would get a second key instead.

@@ -21,7 +21,7 @@ This repository is a Minecraft modpack managed with `modpack-cli` (`modpack`). T
 | Prepare a fresh clone on this machine: git hooks, jars, Modrinth instance, default variant | `modpack setup [--no-launch]` |
 | Bring the socle of this repository to the CLI's version | `modpack update` |
 | See the state of the instance: loaded variant, drift, unknown jars, stale manifest | `modpack status --json` |
-| Add a mod from Modrinth, CurseForge or a local jar | `modpack add <mod> [--version <v>] [--variant <variant>] [--with-deps]` |
+| Add a mod from Modrinth, CurseForge or a local jar, to every variant or to the variants named (`--variant` repeats; `--variant default` alone: the default variant only) | `modpack add <mod> [--version <v>] [--variant <variant>]... [--with-deps]` |
 | Remove a mod from the repository and from every variant (deleting its jar does not) | `modpack remove <key>` |
 | Update the manifest after adding or changing a jar in `mods/` or `mods-local/` (a missing jar keeps its entry) | `modpack manifest` |
 | Approve a local mod for publication, once its jar is reviewed (a changed jar loses its approval) | `modpack approve <key>` |

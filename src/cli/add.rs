@@ -8,9 +8,10 @@ use crate::store::download::{Http, Sources};
 
 #[derive(Debug, clap::Args)]
 #[command(after_help = "Examples:
-  modpack add sodium                                every variant
+  modpack add sodium                                      every variant
   modpack add sodium --variant default --variant lite     the default and lite variants; every other variant removes it
-  modpack add ./tweaks.jar --variant server            the server variant only")]
+  modpack add sodium --variant default                    the default variant only
+  modpack add ./tweaks.jar --variant server               the server variant only")]
 pub struct Args {
     /// Modrinth or CurseForge project (slug, id or URL), or path to a local jar
     #[arg(value_name = "MOD")]

@@ -50,6 +50,7 @@ There is one level of variants. The default variant is the full pack; every othe
 - Without `--variant`, the mod is in every variant.
 - `--variant server --variant hardcore`: the default variant removes the mod, `server` and `hardcore` add it.
 - `--variant default --variant hardcore`: the mod stays in the default selection, and every other variant not named (here `server`) removes it. This is how a client-only mod leaves a `side = "server"` variant.
+- `--variant default` alone: the mod is in the default variant only, and every other variant removes it.
 
 A file without `[default]` is a default variant with every mod. The name `default` is reserved: `[variants.default]` is refused. So are a nested variant (`[variants.server.lowend]`), an unknown field, and a key the manifest does not have. `modpack remove <key>` takes the key out of every variant.
 

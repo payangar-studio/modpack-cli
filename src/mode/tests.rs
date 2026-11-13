@@ -232,6 +232,33 @@ fn a_known_jar_under_another_name_counts_as_present() {
 }
 
 #[test]
+fn a_jar_the_cli_wrote_is_removed_once_the_manifest_drops_it() {
+    let s = Setup::new();
+    s.load(modes::DEFAULT_MODE, false).unwrap();
+
+    // `b` updated to a new jar under another name, `c` updated under the same name.
+    let path = s.root().join(manifest::FILE_NAME);
+    let mut m = Manifest::load(&path).unwrap();
+    let mut b2 = entry("b", b"b2");
+    b2.path = "mods/b-2.0.0.jar".into();
+    m.upsert(b2);
+    m.upsert(entry("c", b"c2"));
+    m.save(&path).unwrap();
+    write(s.root(), "mods/b-2.0.0.jar", "b2");
+    write(s.root(), "mods/c-1.0.0.jar", "c2");
+
+    let report = s.load(modes::DEFAULT_MODE, false).unwrap();
+    assert_eq!(report.removed, ["mods/b-1.0.0.jar", "mods/c-1.0.0.jar"]);
+    assert!(report.unknown.is_empty() && report.forced.is_empty());
+    assert_eq!(
+        s.jars(),
+        ["mods/a-1.0.0.jar", "mods/b-2.0.0.jar", "mods/c-1.0.0.jar"]
+    );
+    assert_eq!(s.read("mods/c-1.0.0.jar"), "c2");
+    assert!(!s.state().files.contains_key("mods/b-1.0.0.jar"));
+}
+
+#[test]
 fn a_jar_unknown_to_the_manifest_is_never_touched() {
     let s = Setup::new();
     write(&s.instance(), "mods/tried.jar", "tried in the app");

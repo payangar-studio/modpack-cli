@@ -121,6 +121,9 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
                 new_state.files.insert(rel, hashes.sha256);
             }
             Some(_) => to_remove.push(rel),
+            // A jar the CLI wrote, unchanged since, whose mod the manifest
+            // dropped or updated: the CLI's to remove, never the user's.
+            None if state.files.get(&rel) == Some(&hashes.sha256) => to_remove.push(rel),
             None => unknown.push(rel),
         }
     }
@@ -133,7 +136,7 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
     let in_the_way: Vec<String> = to_copy
         .iter()
         .map(|(_, rel)| rel.clone())
-        .filter(|rel| instance.join(rel).exists())
+        .filter(|rel| instance.join(rel).exists() && !to_remove.contains(rel))
         .collect();
     if !in_the_way.is_empty() && !force {
         return Err(Error::blocked(

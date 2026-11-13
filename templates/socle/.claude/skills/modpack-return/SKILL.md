@@ -43,23 +43,23 @@ When `unknown_jars` and `drift` are both empty, say that the instance holds noth
 
 ## 2. Identify each unknown jar
 
-The CLI identifies a jar on every platform when it adds it. Run that identification in a throwaway copy of the repository's lists, so that the repository itself is not touched. The copy lives at `/tmp/modpack-return-<name of the repository directory>`, called `<probe>` below: write that path out in full in each command. Quote the paths: instance directories often hold spaces.
+The CLI identifies a jar on every platform when it adds it. Run that identification in a throwaway copy of the repository's lists, so that the repository itself is not touched. The copy lives in `.modpack/local/return/`, which belongs to this repository and git ignores. It holds its own `.modpack/`, so the CLI run inside it takes it for the repository. Each command runs in a fresh shell from the repository root: write the path out in full in each one. Quote the instance paths: instance directories often hold spaces.
 
-Create the copy, in one command:
+Create the copy, in one command, which also clears what an interrupted run left there:
 
 ```bash
-rm -rf "<probe>" && mkdir -p "<probe>/.modpack" && cp .modpack/socle.toml "<probe>/.modpack/" && cp mods.lock.toml variants.toml "<probe>/"
+rm -rf .modpack/local/return && mkdir -p .modpack/local/return/.modpack && cp .modpack/socle.toml .modpack/local/return/.modpack/ && cp mods.lock.toml variants.toml .modpack/local/return/
 ```
 
 Then, once per unknown jar:
 
 ```bash
-(cd "<probe>" && modpack add "<instance.path>/<path>")
+(cd .modpack/local/return && modpack add "<instance.path>/<path>")
 ```
 
 For each jar, `modpack add` prints the key it chose and the platforms that know it (`added `<key>` (mods/<file>), on modrinth, curseforge` or `found on no platform`), then the required dependencies missing from the pack. A line `curseforge skipped: CurseForge needs a Core API key` means CurseForge was not asked: its availability there is unknown, not absent.
 
-Then read each new entry in `<probe>/mods.lock.toml` (the `[[mods]]` block whose `key` was printed):
+Then read each new entry in `.modpack/local/return/mods.lock.toml` (the `[[mods]]` block whose `key` was printed):
 
 - `[mods.modrinth]`: `project_id`, `version_id`, `dependencies` (required ones, as Modrinth project ids). Name and page: `curl -s https://api.modrinth.com/v2/project/<project_id>` (fields `title`, `slug`, `license.id`). The version: `curl -s https://api.modrinth.com/v2/version/<version_id>` (fields `version_number`, `game_versions`, `loaders`, and `dependencies` with their `dependency_type`, which also lists `incompatible` projects).
 - `[mods.curseforge]`: `projectID`, `fileID`, `dependencies` when present.
@@ -79,7 +79,7 @@ Also compare with the pack:
 Remove the copy when done:
 
 ```bash
-rm -rf "<probe>"
+rm -rf .modpack/local/return
 ```
 
 ## 3. Find the config files the tried mods created

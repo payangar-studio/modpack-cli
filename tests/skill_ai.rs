@@ -236,6 +236,50 @@ fn the_audit_skill_builds_inside_the_repository() {
     );
 }
 
+/// Same for the return skill's probe copy: inside the repository, ignored by
+/// git, and taken by the CLI for a repository of its own.
+#[test]
+fn the_return_skill_probes_inside_the_repository() {
+    let text = skill_template("modpack-return");
+    assert!(!text.contains("/tmp"), "a path shared between clones");
+    let create = text
+        .lines()
+        .find(|l| l.starts_with("rm -rf .modpack/local/return && "))
+        .expect("command creating the probe copy");
+    assert!(
+        text.contains("(cd .modpack/local/return && modpack add "),
+        "probe add"
+    );
+    let (_tmp, root) = init_repo();
+    let run = |program: &str, args: &[&str], dir: &Path| {
+        std::process::Command::new(program)
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap()
+            .success()
+    };
+    assert!(run("git", &["init", "--quiet"], &root));
+    assert!(
+        run(
+            "git",
+            &[
+                "check-ignore",
+                "--quiet",
+                ".modpack/local/return/mods.lock.toml"
+            ],
+            &root
+        ),
+        ".modpack/local/return/ is not ignored by git"
+    );
+    // The command as written builds a copy the CLI works in.
+    assert!(run("sh", &["-c", create], &root), "{create}");
+    modpack(&root.join(".modpack/local/return"))
+        .args(["approve", "--check"])
+        .assert()
+        .success();
+}
+
 #[test]
 fn init_lays_down_the_skills_and_the_block() {
     let (_tmp, root) = init_repo();

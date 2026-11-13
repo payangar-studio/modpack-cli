@@ -146,6 +146,20 @@ fn update_on_an_up_to_date_repository_does_nothing_and_says_so() {
 }
 
 #[test]
+fn forced_update_on_an_up_to_date_repository_restores_the_socle() {
+    let (_tmp, root) = init_repo();
+    let before = read(&root, ".modpack/README.md");
+    fs::write(root.join(".modpack/README.md"), "edited\n").unwrap();
+    fs::write(root.join(".modpack/socle.lock"), "not toml [").unwrap();
+    modpack(&root)
+        .args(["update", "--force"])
+        .assert()
+        .success();
+    assert_eq!(read(&root, ".modpack/README.md"), before);
+    assert!(read(&root, ".modpack/socle.lock").contains(".modpack/README.md"));
+}
+
+#[test]
 fn update_stops_on_a_hand_edited_file_unless_forced() {
     let (_tmp, root) = init_repo();
     make_older(&root);

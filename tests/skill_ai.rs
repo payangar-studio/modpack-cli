@@ -180,6 +180,24 @@ fn the_return_skill_reads_the_status_json() {
 }
 
 #[test]
+fn the_return_skill_shows_every_license_and_reads_sides_as_written() {
+    let text = skill_template("modpack-return");
+    // The license of every jar, not only of the ones no platform hosts.
+    assert!(text.contains("- **License**: every jar"), "license step");
+    assert!(
+        text.contains("its license, always"),
+        "license in the proposal"
+    );
+    assert!(text.contains("LicenseRef-"), "non-open licenses flagged");
+    // A variant without `side` is not assumed to be a client one.
+    assert!(text.contains("accepts both sides"), "variant without side");
+    assert!(
+        !text.contains("`default` (`side = \"client\"`)"),
+        "example built on a default variant declaring a side"
+    );
+}
+
+#[test]
 fn the_audit_skill_records_the_audited_commit() {
     let text = skill_template("modpack-audit");
     for needle in [

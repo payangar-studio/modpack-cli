@@ -249,3 +249,63 @@ fn a_failed_install_leaves_the_merge_done() {
     assert!(stderr.contains("left as it is"), "{stderr}");
     assert!(Path::new(&repo.root.join("config/b.toml")).is_file());
 }
+
+#[test]
+fn offline_the_real_hook_commits_a_local_jar_and_its_entry() {
+    let repo = Repo::new();
+    // The real `modpack` first in PATH, every platform unreachable through a
+    // proxy that refuses connections.
+    let real = Path::new(env!("CARGO_BIN_EXE_modpack")).parent().unwrap();
+    let path = std::env::join_paths(
+        std::iter::once(real.to_owned()).chain(std::env::split_paths(&repo.path(false))),
+    )
+    .unwrap();
+    let offline = |cmd: &mut Command| {
+        cmd.env("PATH", &path);
+        for var in [
+            "HTTPS_PROXY",
+            "HTTP_PROXY",
+            "ALL_PROXY",
+            "https_proxy",
+            "http_proxy",
+            "all_proxy",
+        ] {
+            cmd.env(var, "http://127.0.0.1:1");
+        }
+        cmd.env_remove("NO_PROXY").env_remove("no_proxy");
+        cmd.env("MODPACK_CURSEFORGE_API_KEY", "unused");
+    };
+
+    repo.write("mods-local/custom-tweaks-0.3.jar", "local jar");
+    repo.write("mods/by-hand.jar", "jar from somewhere");
+    repo.write("config/a.toml", "a = 1\n");
+    repo.git(&["add", "config/a.toml"]);
+    let out = repo.run_git(&["commit", "--quiet", "-m", "config"], offline);
+    assert!(out.status.success(), "{out:?}");
+    // Git sends a hook's output to stderr.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("warning: modrinth skipped"), "{stderr}");
+
+    let committed = repo.git(&["show", "--name-only", "--format=", "HEAD"]);
+    assert!(
+        committed.contains("mods-local/custom-tweaks-0.3.jar"),
+        "{committed}"
+    );
+    let manifest = repo.git(&["show", "HEAD:mods.lock.toml"]);
+    assert!(manifest.contains("key = \"custom-tweaks\""), "{manifest}");
+    assert!(manifest.contains("source = \"local\""), "{manifest}");
+    assert!(manifest.contains("key = \"by-hand\""), "{manifest}");
+    assert_eq!(repo.git(&["status", "--porcelain"]), "");
+
+    // A jar deleted by hand keeps its entry: the hook does not commit its
+    // deletion, which would leave the entry without a jar in git.
+    std::fs::remove_file(repo.root.join("mods-local/custom-tweaks-0.3.jar")).unwrap();
+    repo.write("config/b.toml", "b = 1\n");
+    repo.git(&["add", "config/b.toml"]);
+    let out = repo.run_git(&["commit", "--quiet", "-m", "config b"], offline);
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        repo.git(&["ls-files", "mods-local"]),
+        "mods-local/custom-tweaks-0.3.jar\n"
+    );
+}

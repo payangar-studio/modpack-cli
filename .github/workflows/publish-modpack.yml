@@ -114,6 +114,34 @@ jobs:
           echo "$dir/bin" >> "$GITHUB_PATH"
           echo "Installed modpack $tag."
 
+      # A local mod (a jar of mods-local/) is published only once approved:
+      # its approval, recorded in the manifest, matches the jar's hash. A dry
+      # run publishes nothing, so it only warns.
+      - name: Check that the local mods are approved
+        env:
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          status=0
+          modpack approve --check > "$RUNNER_TEMP/approve.txt" || status=$?
+          if [[ $status -eq 0 ]]; then
+            cat "$RUNNER_TEMP/approve.txt"
+            exit 0
+          fi
+          # 3 is a local mod not approved; anything else, a broken repository.
+          if [[ $status -ne 3 ]]; then
+            echo "::error::modpack approve --check failed, see its error above."
+            exit 1
+          fi
+          level=error
+          if [[ "$DRY_RUN" == true ]]; then level=warning; fi
+          while IFS= read -r line; do
+            [[ -n "$line" ]] && echo "::$level::$line"
+          done < "$RUNNER_TEMP/approve.txt"
+          if [[ "$DRY_RUN" != true ]]; then
+            echo "- Not published: a local mod is not approved, see the errors of the step \`Check that the local mods are approved\`." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
       - name: Read the secrets from the vault
         if: ${{ !inputs.dry-run }}
         env:
@@ -200,8 +228,8 @@ jobs:
           fi
           echo "PUBLISH_PLATFORMS=${publish[*]}" >> "$GITHUB_ENV"
 
-      # `pack` builds from the manifest, config and overrides alone: no jar is
-      # downloaded, so the CI needs no CurseForge API key.
+      # `pack` builds from the manifest, config, overrides and mods-local/:
+      # no jar is downloaded, so the CI needs no CurseForge API key.
       - name: Build the packs
         id: pack
         env:
@@ -227,9 +255,11 @@ jobs:
             fi
             reports+=("$report")
           done
-          jq -s '{artifacts: (map(.artifacts) | add), blocked: (map(.blocked) | add)}' "${reports[@]}" \
+          jq -s '{artifacts: (map(.artifacts) | add), blocked: (map(.blocked) | add),
+            warnings: (map(.warnings // []) | add | unique)}' "${reports[@]}" \
             > "$RUNNER_TEMP/pack-report.json"
           jq -r '.artifacts[] | "Built \(.path) (\(.platform), mode \(.mode))."' "$RUNNER_TEMP/pack-report.json"
+          jq -r '.warnings[] | "::warning::\(.)"' "$RUNNER_TEMP/pack-report.json"
 
           # Changelog: changelogs/<version>.md, else the tag's message.
           changelog="$RUNNER_TEMP/changelog.md"

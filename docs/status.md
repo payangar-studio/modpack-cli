@@ -1,6 +1,6 @@
 # `modpack status --json`
 
-`modpack status` reports the state of a pack on this machine: the socle version, the pack's Modrinth instance, the mode loaded there, drift, jars of the instance the manifest does not know, and how `mods/` of the repository compares to the manifest. It reads files only: it writes nothing and makes no network call.
+`modpack status` reports the state of a pack on this machine: the socle version, the pack's Modrinth instance, the mode loaded there, drift, jars of the instance the manifest does not know, how `mods/` and `mods-local/` of the repository compare to the manifest, and the local mods with their approval. It reads files only: it writes nothing and makes no network call.
 
 With `--json`, the report is one JSON object on stdout. This format is the contract read by the socle's return skill (`modpack-return`). Logs go to stderr and never mix with it.
 
@@ -23,16 +23,17 @@ With `--json`, the report is one JSON object on stdout. This format is the contr
 | `instance.drift` | Files the CLI wrote into the instance that changed or were deleted since, relative to the instance, with `/` separators. |
 | `instance.disabled` | Jars of `drift` that the Modrinth App disabled: renamed `<jar>.disabled`, content unchanged. `modpack mode load <mode> --force` enables them again. |
 | `instance.unknown_jars` | Jars of the instance's `mods/` whose sha1 and sha512 match no manifest entry, whatever their file name, with their hashes so they can be looked up on the platforms. |
-| `missing_jars` | Manifest entries whose jar is absent from `mods/` of the repository, or replaced by an older jar `modpack install` downloaded and nobody changed since: `modpack install` downloads them. |
+| `missing_jars` | Manifest entries whose jar is absent from `mods/` of the repository, or replaced by an older jar `modpack install` downloaded and nobody changed since: `modpack install` downloads them. A local mod listed here lost its jar from `mods-local/`: git restores it. |
 | `manifest.stale` | `true` when `new_jars` or `changed` is not empty: `modpack manifest` regenerates the manifest. |
-| `manifest.new_jars` | Jars of `mods/` of the repository that no entry lists, except the ones `modpack install` downloaded and nobody changed since: those are removed by the next `modpack install`, never added back. |
-| `manifest.changed` | Entries whose jar is in `mods/` of the repository with other hashes than the manifest's. |
+| `manifest.new_jars` | Jars of `mods/` or `mods-local/` of the repository that no entry lists, except the ones `modpack install` downloaded and nobody changed since: those are removed by the next `modpack install`, never added back. |
+| `manifest.changed` | Entries whose jar is in `mods/` or `mods-local/` of the repository with other hashes than the manifest's. |
+| `local_mods` | The local mods: jars tracked by git in `mods-local/` (see [local mods](local-mods.md)). `approved` is `true` when the approval recorded in the manifest matches the jar; the publish workflow refuses to publish while one is `false`, and `modpack approve <key>` approves it. |
 
 Only hashes are compared: the report never asks a platform about a jar.
 
 A jar listed in `missing_jars` does not make the manifest stale: a missing jar means "not installed on this machine", never "removed from the pack", and `modpack manifest` keeps its entry. It is the usual case in a fresh clone, since git does not hold the jars. A mod leaves the pack only through `modpack remove <key>`, which also takes its key out of the modes.
 
-Lists are sorted. Paths of jars are relative (`mods/<name>`), to the instance for `unknown_jars`, to the repository otherwise.
+Lists are sorted. Paths of jars are relative (`mods/<name>`, `mods-local/<name>`), to the instance for `unknown_jars`, to the repository otherwise.
 
 ## Schema
 
@@ -44,7 +45,7 @@ JSON Schema (draft 2020-12). It describes this version exactly. A later version 
   "title": "modpack status",
   "type": "object",
   "additionalProperties": false,
-  "required": ["socle", "instance", "missing_jars", "manifest"],
+  "required": ["socle", "instance", "missing_jars", "manifest", "local_mods"],
   "properties": {
     "socle": {
       "type": "object",
@@ -95,6 +96,19 @@ JSON Schema (draft 2020-12). It describes this version exactly. A later version 
         "new_jars": { "type": "array", "items": { "type": "string" } },
         "changed": { "type": "array", "items": { "$ref": "#/$defs/jar" } }
       }
+    },
+    "local_mods": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "path", "approved"],
+        "properties": {
+          "key": { "type": "string" },
+          "path": { "type": "string" },
+          "approved": { "type": "boolean" }
+        }
+      }
     }
   },
   "$defs": {
@@ -113,7 +127,7 @@ JSON Schema (draft 2020-12). It describes this version exactly. A later version 
 
 ## Example
 
-An instance where a config file was changed in game and a mod was tried from the app, in a repository where `iris` is not downloaded yet.
+An instance where a config file was changed in game and a mod was tried from the app, in a repository where `iris` is not downloaded yet and the local mod `custom-tweaks` is not approved.
 
 ```json
 {
@@ -132,6 +146,7 @@ An instance where a config file was changed in game and a mod was tried from the
     ]
   },
   "missing_jars": [{ "key": "iris", "path": "mods/iris-neoforge-1.8.1.jar" }],
-  "manifest": { "stale": false, "new_jars": [], "changed": [] }
+  "manifest": { "stale": false, "new_jars": [], "changed": [] },
+  "local_mods": [{ "key": "custom-tweaks", "path": "mods-local/custom-tweaks-0.3.jar", "approved": false }]
 }
 ```

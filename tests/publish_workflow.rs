@@ -248,3 +248,114 @@ fn the_default_mode_is_published_last_on_each_platform() {
         "server\ts.mrpack\nlite\tl.mrpack\ndefault\td.mrpack\n"
     );
 }
+
+/// Runs the step `Check that the local mods are approved` in `root`, with the
+/// `modpack` under test in `PATH`: exit success, output, run summary.
+fn approval_gate(root: &Path, dry_run: bool) -> (bool, String, String) {
+    let bin = Path::new(env!("CARGO_BIN_EXE_modpack")).parent().unwrap();
+    let path = std::env::join_paths(
+        std::iter::once(bin.to_owned())
+            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let summary = temp.path().join("summary");
+    let out = Process::new("bash")
+        .args([
+            "-e",
+            "-c",
+            &step_script("Check that the local mods are approved"),
+        ])
+        .current_dir(root)
+        .env("PATH", path)
+        .env("RUNNER_TEMP", temp.path())
+        .env("GITHUB_STEP_SUMMARY", &summary)
+        .env("DRY_RUN", dry_run.to_string())
+        .env_remove("RUST_LOG")
+        .output()
+        .unwrap();
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        fs::read_to_string(&summary).unwrap_or_default(),
+    )
+}
+
+#[test]
+fn the_publish_gate_refuses_an_unapproved_local_mod() {
+    let (_tmp, root) = init_repo();
+    let (ok, out, _) = approval_gate(&root, false);
+    assert!(ok, "no local mod: {out}");
+
+    fs::create_dir_all(root.join("mods-local")).unwrap();
+    fs::write(root.join("mods-local/custom-tweaks-0.3.jar"), b"jar").unwrap();
+    // A local jar only: the manifest asks no platform, offline or not.
+    modpack(&root).arg("manifest").assert().success();
+
+    let (ok, out, summary) = approval_gate(&root, false);
+    assert!(!ok, "{out}");
+    assert!(
+        out.contains("::error::`custom-tweaks` (mods-local/custom-tweaks-0.3.jar) is not approved"),
+        "{out}"
+    );
+    assert!(out.contains("`modpack approve custom-tweaks`"), "{out}");
+    assert!(summary.contains("Not published"), "{summary}");
+
+    // A dry run publishes nothing: it warns.
+    let (ok, out, _) = approval_gate(&root, true);
+    assert!(ok, "{out}");
+    assert!(out.contains("::warning::`custom-tweaks`"), "{out}");
+
+    modpack(&root)
+        .args(["approve", "custom-tweaks"])
+        .assert()
+        .success();
+    let (ok, out, _) = approval_gate(&root, false);
+    assert!(ok, "{out}");
+    assert!(out.contains("all approved"), "{out}");
+
+    // A new jar under the same name loses the approval.
+    fs::write(
+        root.join("mods-local/custom-tweaks-0.3.jar"),
+        b"jar, rebuilt",
+    )
+    .unwrap();
+    modpack(&root).arg("manifest").assert().success();
+    let (ok, out, _) = approval_gate(&root, false);
+    assert!(!ok, "{out}");
+}
+
+#[test]
+fn the_build_step_merges_the_reports_and_their_warnings() {
+    let script = step_script("Build the packs");
+    let filter = script
+        .split("jq -s '")
+        .nth(1)
+        .and_then(|rest| rest.split('\'').next())
+        .expect("the reports are merged with jq -s");
+    let dir = tempfile::tempdir().unwrap();
+    let a = dir.path().join("a.json");
+    let b = dir.path().join("b.json");
+    fs::write(
+        &a,
+        r#"{"artifacts": [{"mode": "default"}], "blocked": [], "warnings": ["w1", "w2"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        &b,
+        r#"{"artifacts": [{"mode": "server"}], "blocked": [], "warnings": ["w1"]}"#,
+    )
+    .unwrap();
+    let out = Process::new("jq")
+        .args(["-c", "-s", filter])
+        .arg(&a)
+        .arg(&b)
+        .output()
+        .expect("jq runs");
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        "{\"artifacts\":[{\"mode\":\"default\"},{\"mode\":\"server\"}],\"blocked\":[],\"warnings\":[\"w1\",\"w2\"]}\n"
+    );
+    assert!(script.contains(r#"jq -r '.warnings[] | "::warning::\(.)"'"#));
+}

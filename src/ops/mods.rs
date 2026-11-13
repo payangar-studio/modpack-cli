@@ -3,24 +3,28 @@
 //! A mod comes from a platform (slug, id or URL, resolved by the first
 //! platform of the registry that knows it) or from a local jar. Either way its
 //! jar lands in `mods/`, every platform that knows it completes its entry, and
-//! the manifest is written. A mod for one mode only is removed from the
-//! default mode and added to that mode in `modes.toml`.
+//! the manifest is written. A jar already in `mods-local/` is a local mod,
+//! tracked by git; a mod added from a platform whose slug is the key of a
+//! local mod replaces it, and its jar leaves git once the manifest is saved.
+//! A mod for one mode only is removed from the default mode and added to that
+//! mode in `modes.toml`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
 
-use super::manifest::{Draft, complete, first_line, load_or_new};
+use super::local::{jar_committed, remove_jar};
+use super::manifest::{Draft, check_file_name, complete, first_line, load_or_new};
 use super::modes_edit;
 use crate::error::{Context, Error, Result};
-use crate::model::manifest::{self, Entry, Env, Hashes, Manifest, Pack};
+use crate::model::manifest::{self, Entry, Env, Hashes, Manifest, Pack, normalize_key};
 use crate::model::modes::DEFAULT_MODE;
 use crate::platform::{Candidate, Download, Platform, ProjectName};
 use crate::prompt::Prompt;
 use crate::store::download::{Sources, download};
 use crate::store::hash::{copy_hashing, hash_file};
-use crate::store::{MODS_DIR, jar_path, write_atomic};
+use crate::store::{LOCAL_DIR, MODS_DIR, jar_path, write_atomic};
 
 /// Fields a platform table names its project by: `project_id` for Modrinth,
 /// `projectID` for CurseForge, `id` for the test platform. A table's
@@ -39,6 +43,36 @@ pub struct AddRequest {
     pub url: Option<String>,
     /// Add the missing required dependencies without asking.
     pub with_deps: bool,
+    /// Replace a local mod even when git does not hold its jar committed,
+    /// deleting that jar all the same.
+    pub force: bool,
+}
+
+/// What one `modpack add` changes: the manifest, and the local mods that mods
+/// from a platform replace, whose jars leave `mods-local/` only once the
+/// manifest is saved.
+struct Edit {
+    manifest: Manifest,
+    /// See [`AddRequest::force`].
+    force: bool,
+    replaced: Vec<Entry>,
+}
+
+impl Edit {
+    /// Saves the manifest, then takes the jars of the replaced local mods out
+    /// of `mods-local/` and git.
+    fn save(&mut self, root: &Path, out: &mut dyn Write) -> Result<()> {
+        self.manifest.save(&root.join(manifest::FILE_NAME))?;
+        for local in self.replaced.drain(..) {
+            remove_jar(root, &local)?;
+            writeln!(
+                out,
+                "replaced the local mod `{}`: {} removed from mods-local/ and from git",
+                local.key, local.path
+            )?;
+        }
+        Ok(())
+    }
 }
 
 /// Adds a mod, then deals with its missing required dependencies. Returns the
@@ -54,11 +88,15 @@ pub fn add(
     if let Some(mode) = mode {
         modes_edit::require_mode(root, mode)?;
     }
-    let mut manifest = load_or_new(root)?;
+    let mut edit = Edit {
+        manifest: load_or_new(root)?,
+        force: req.force,
+        replaced: Vec::new(),
+    };
 
     let local = Path::new(&req.mod_ref);
     let existing = if req.with_deps && req.version.is_none() && !local.is_file() {
-        in_pack(sources, &manifest, &req.mod_ref)
+        in_pack(sources, &edit.manifest, &req.mod_ref)
     } else {
         None
     };
@@ -71,7 +109,14 @@ pub fn add(
                 "drop --version: a local jar is added as it is",
             ));
         }
-        add_local(root, sources, &mut manifest, local, req.url.clone(), out)?
+        add_local(
+            root,
+            sources,
+            &mut edit.manifest,
+            local,
+            req.url.clone(),
+            out,
+        )?
     } else if req.mod_ref.to_ascii_lowercase().ends_with(".jar") && !req.mod_ref.contains("://") {
         return Err(Error::usage(
             format!("no jar at {}", req.mod_ref),
@@ -82,17 +127,9 @@ pub fn add(
             version: req.version.as_deref(),
             prompt: Some(prompt),
         };
-        add_remote(
-            root,
-            sources,
-            &mut manifest,
-            None,
-            &req.mod_ref,
-            choice,
-            out,
-        )?
+        add_remote(root, sources, &mut edit, None, &req.mod_ref, choice, out)?
     };
-    manifest.save(&root.join(manifest::FILE_NAME))?;
+    edit.save(root, out)?;
 
     let mut added = vec![key.clone()];
     add_dependencies(
@@ -100,11 +137,11 @@ pub fn add(
         sources,
         prompt,
         req.with_deps,
-        &mut manifest,
+        &mut edit,
         &mut added,
         out,
     )?;
-    manifest.save(&root.join(manifest::FILE_NAME))?;
+    edit.save(root, out)?;
     if existing.is_some() {
         // The mod was already there: only its dependencies are new.
         added.remove(0);
@@ -141,7 +178,9 @@ pub fn remove(root: &Path, key: &str, out: &mut dyn Write) -> Result<()> {
             format!("use a key listed in {}", manifest::FILE_NAME),
         )
     })?;
-    if let Ok(jar) = jar_path(root, entry)
+    if entry.is_local() {
+        remove_jar(root, entry)?;
+    } else if let Ok(jar) = jar_path(root, entry)
         && jar.is_file()
     {
         fs::remove_file(&jar).context(format!("removing {}", jar.display()))?;
@@ -160,7 +199,9 @@ pub fn remove(root: &Path, key: &str, out: &mut dyn Write) -> Result<()> {
 /// else by project on the platform that resolves it. A failed lookup counts
 /// as not held: adding it then reports the failure.
 fn in_pack(sources: Sources<'_>, manifest: &Manifest, query: &str) -> Option<String> {
-    if manifest.get(query).is_some() {
+    // A local mod under that key is not held: adding it from a platform
+    // replaces it when the project's slug is that key.
+    if manifest.get(query).is_some_and(|e| !e.is_local()) {
         return Some(query.to_owned());
     }
     let (platform, candidates) = resolve(sources, None, query, manifest).ok()?;
@@ -196,7 +237,11 @@ fn add_local(
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or_else(|| Error::usage("the jar has no usable file name", "rename the jar"))?;
+    if in_local_dir(root, source)? {
+        return add_tracked(root, sources, manifest, name, out);
+    }
     let rel = format!("{MODS_DIR}/{name}");
+    check_file_name(manifest, &rel, None)?;
     let dest = root.join(MODS_DIR).join(name);
     let same_file = dest.is_file()
         && fs::canonicalize(source).context("reading the jar")?
@@ -246,27 +291,83 @@ fn add_local(
     Ok(key)
 }
 
-/// Resolves a mod on `on`, or on the first platform of the registry that
-/// knows it, downloads the chosen version into `mods/` and builds its entry.
-/// A mod already in the manifest from the same project is replaced under its
-/// key.
-fn add_remote(
+/// Whether `jar` sits directly in the repository's `mods-local/`.
+fn in_local_dir(root: &Path, jar: &Path) -> Result<bool> {
+    let dir = root.join(LOCAL_DIR);
+    let (Some(parent), true) = (jar.parent(), dir.is_dir()) else {
+        return Ok(false);
+    };
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
+    Ok(fs::canonicalize(parent).context("reading the jar")?
+        == fs::canonicalize(&dir).context(format!("reading {}", dir.display()))?)
+}
+
+/// Builds the entry of a local mod, whose jar `name` is in `mods-local/`. No
+/// platform is asked: git holds the jar.
+fn add_tracked(
     root: &Path,
     sources: Sources<'_>,
     manifest: &mut Manifest,
+    name: &str,
+    out: &mut dyn Write,
+) -> Result<String> {
+    let rel = format!("{LOCAL_DIR}/{name}");
+    check_file_name(manifest, &rel, None)?;
+    let kept = manifest.mods.iter().find(|e| e.path == rel).cloned();
+    let mut draft = Draft::from_jar(root, &rel, kept.as_ref().map(|e| e.key.clone()))?;
+    // The same jar again keeps its approval: only a changed jar loses it.
+    if let Some(kept) = kept.filter(|e| e.hashes == draft.entry.hashes) {
+        draft.entry.approved = kept.approved;
+    }
+    let key = draft.commit(manifest, sources.registry);
+    if manifest.get(&key).is_some_and(Entry::is_approved) {
+        writeln!(out, "`{key}` ({rel}) is already a local mod, approved")?;
+        return Ok(key);
+    }
+    writeln!(
+        out,
+        "added the local mod `{key}` ({rel}), tracked by git; review it, then run `modpack approve {key}` before publishing"
+    )?;
+    Ok(key)
+}
+
+/// Resolves a mod on `on`, or on the first platform of the registry that
+/// knows it, downloads the chosen version into `mods/` and builds its entry.
+/// A mod already in the manifest from the same project is replaced under its
+/// key, and so is a local mod whose key is the resolved project's slug: its
+/// jar leaves `mods-local/` and git once the manifest is saved, and only when
+/// git holds it committed, unless `--force`.
+fn add_remote(
+    root: &Path,
+    sources: Sources<'_>,
+    edit: &mut Edit,
     on: Option<&dyn Platform>,
     query: &str,
     choice: Choice<'_>,
     out: &mut dyn Write,
 ) -> Result<String> {
+    let manifest = &mut edit.manifest;
     let (platform, candidates) = resolve(sources, on, query, manifest)?;
     let candidate = choose(candidates, query, &manifest.pack, choice)?;
     let name = platform.name();
 
+    // A local mod is replaced on the slug only: `query` naming its key may
+    // resolve to another project.
+    let slug_key = candidate.slug.as_deref().map(normalize_key);
     let previous = manifest
         .mods
         .iter()
         .find(|e| same_project(e.platform(name), &candidate.section))
+        .or_else(|| {
+            manifest
+                .mods
+                .iter()
+                .find(|e| e.is_local() && Some(e.key.as_str()) == slug_key.as_deref())
+        })
         .cloned();
     let rel = format!("{MODS_DIR}/{}", candidate.file_name);
     if let Some(other) = manifest
@@ -279,6 +380,23 @@ fn add_remote(
             format!("remove `{}` first with `modpack remove`", other.key),
         ));
     }
+    check_file_name(manifest, &rel, previous.as_ref().map(|p| p.key.as_str()))?;
+    if let Some(local) = previous.as_ref().filter(|p| p.is_local())
+        && !edit.force
+        && jar_path(root, local)?.is_file()
+        && !jar_committed(root, local)
+    {
+        return Err(Error::blocked(
+            format!(
+                "replacing the local mod `{}` would delete {}, which is not committed in git",
+                local.key, local.path
+            ),
+            format!(
+                "commit {} first, or rerun with --force to delete it anyway",
+                local.path
+            ),
+        ));
+    }
 
     let mut entry = Entry {
         key: previous
@@ -288,6 +406,8 @@ fn add_remote(
         file_size: 0,
         downloads: Vec::new(),
         url: None,
+        source: None,
+        approved: None,
         hashes: Hashes {
             sha1: String::new(),
             sha512: String::new(),
@@ -297,7 +417,9 @@ fn add_remote(
     };
     platform.fill_entry(&mut entry)?;
     fetch(root, sources, platform, &mut entry)?;
-    if let Some(previous) = &previous
+    if let Some(local) = previous.as_ref().filter(|p| p.is_local()) {
+        edit.replaced.push(local.clone());
+    } else if let Some(previous) = &previous
         && previous.path != entry.path
         && let Ok(old) = jar_path(root, previous)
         && old.is_file()
@@ -313,7 +435,7 @@ fn add_remote(
     let warnings = complete(root, &mut drafts, sources.registry);
     let [draft] = drafts;
     let platforms = names(&draft.entry);
-    let key = draft.commit(manifest, sources.registry);
+    let key = draft.commit(&mut edit.manifest, sources.registry);
     for warning in warnings {
         writeln!(out, "warning: {warning}")?;
     }
@@ -499,11 +621,11 @@ fn add_dependencies(
     sources: Sources<'_>,
     prompt: &Prompt,
     with_deps: bool,
-    manifest: &mut Manifest,
+    edit: &mut Edit,
     added: &mut Vec<String>,
     out: &mut dyn Write,
 ) -> Result<()> {
-    let mut missing = missing_dependencies(manifest, added);
+    let mut missing = missing_dependencies(&edit.manifest, added);
     if missing.is_empty() {
         return Ok(());
     }
@@ -527,7 +649,7 @@ fn add_dependencies(
 
     let mut tried = BTreeSet::new();
     loop {
-        let Some(dep) = missing_dependencies(manifest, added)
+        let Some(dep) = missing_dependencies(&edit.manifest, added)
             .into_iter()
             .find(|d| !tried.contains(d))
         else {
@@ -541,15 +663,7 @@ fn add_dependencies(
             version: None,
             prompt: None,
         };
-        match add_remote(
-            root,
-            sources,
-            manifest,
-            Some(platform),
-            &dep.id,
-            choice,
-            out,
-        ) {
+        match add_remote(root, sources, edit, Some(platform), &dep.id, choice, out) {
             Ok(key) => added.push(key),
             Err(err) => writeln!(out, "warning: could not add {dep}: {}", first_line(&err))?,
         }
@@ -1023,6 +1137,276 @@ mod tests {
             .unwrap();
         assert_eq!(key, "rubidium");
         assert_eq!(load(root.path()).mods.len(), 1);
+    }
+
+    fn git(root: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    /// A git repository with the local mod `sodium` (a development build),
+    /// committed, listed in the manifest and in a mode.
+    fn with_local_sodium() -> tempfile::TempDir {
+        let root = repo();
+        git(root.path(), &["init", "--quiet"]);
+        fs::create_dir_all(root.path().join("mods-local")).unwrap();
+        fs::write(root.path().join("mods-local/sodium-dev.jar"), b"dev build").unwrap();
+        fs::write(root.path().join("modes.toml"), MODES).unwrap();
+        let jar = root.path().join("mods-local/sodium-dev.jar");
+        let (result, out) = run_add(root.path(), &registry(), &request(jar.to_str().unwrap()));
+        assert_eq!(result.unwrap(), "sodium-dev");
+        assert!(out.contains("added the local mod `sodium-dev`"), "{out}");
+        assert!(out.contains("modpack approve sodium-dev"), "{out}");
+        // Renamed to the slug the published mod will have.
+        let path = root.path().join(manifest::FILE_NAME);
+        let mut manifest = load(root.path());
+        let mut entry = manifest.remove("sodium-dev").unwrap();
+        entry.key = "sodium".into();
+        manifest.upsert(entry);
+        manifest.save(&path).unwrap();
+        git(root.path(), &["add", "mods-local"]);
+        git(
+            root.path(),
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "--quiet",
+                "-m",
+                "local mod",
+            ],
+        );
+        root
+    }
+
+    /// Resolves `rubidium` to the project `sodium`, as a platform resolves an
+    /// id or a URL to a project of another slug.
+    struct Alias(FakePlatform);
+
+    impl Platform for Alias {
+        fn name(&self) -> &str {
+            self.0.name()
+        }
+        fn capability(&self, op: Operation) -> Capability {
+            self.0.capability(op)
+        }
+        fn resolve(
+            &self,
+            query: &str,
+            pack: &crate::model::manifest::Pack,
+        ) -> Result<Vec<Candidate>> {
+            let query = if query == "rubidium" { "sodium" } else { query };
+            self.0.resolve(query, pack)
+        }
+        fn fill_entry(&self, entry: &mut Entry) -> Result<()> {
+            self.0.fill_entry(entry)
+        }
+        fn download(&self, entry: &Entry) -> Result<Download> {
+            self.0.download(entry)
+        }
+    }
+
+    #[test]
+    fn a_local_mod_named_by_the_query_but_not_by_the_slug_is_kept() {
+        let root = with_local_sodium();
+        let path = root.path().join(manifest::FILE_NAME);
+        let mut manifest = load(root.path());
+        let mut entry = manifest.remove("sodium").unwrap();
+        entry.key = "rubidium".into();
+        manifest.upsert(entry);
+        manifest.save(&path).unwrap();
+        let registry = Registry::new(vec![Box::new(Alias(
+            FakePlatform::new("fake").with(FakeMod::new("sodium")),
+        ))]);
+
+        let (result, out) = run_add(root.path(), &registry, &request("rubidium"));
+        assert_eq!(result.unwrap(), "sodium");
+        assert!(!out.contains("replaced"), "{out}");
+        let manifest = load(root.path());
+        assert!(manifest.get("rubidium").unwrap().is_local());
+        assert!(!manifest.get("sodium").unwrap().is_local());
+        assert!(root.path().join("mods-local/sodium-dev.jar").is_file());
+        assert_eq!(
+            git(root.path(), &["ls-files", "mods-local"]),
+            "mods-local/sodium-dev.jar\n"
+        );
+    }
+
+    #[test]
+    fn a_local_jar_not_committed_is_replaced_only_with_force() {
+        let root = with_local_sodium();
+        let jar = root.path().join("mods-local/sodium-dev.jar");
+        fs::write(&jar, b"unsaved work").unwrap();
+        let before = load(root.path());
+
+        let (result, _) = run_add(root.path(), &registry(), &request("sodium"));
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Blocked);
+        assert!(
+            err.to_string()
+                .contains("would delete mods-local/sodium-dev.jar"),
+            "{err}"
+        );
+        assert!(err.hint().contains("--force"), "{}", err.hint());
+        assert_eq!(fs::read(&jar).unwrap(), b"unsaved work");
+        assert_eq!(load(root.path()), before);
+        assert!(!root.path().join("mods/sodium-1.0.0.jar").exists());
+
+        let req = AddRequest {
+            force: true,
+            ..request("sodium")
+        };
+        let (result, out) = run_add(root.path(), &registry(), &req);
+        assert_eq!(result.unwrap(), "sodium");
+        assert!(out.contains("replaced the local mod `sodium`"), "{out}");
+        assert!(!jar.exists());
+    }
+
+    #[test]
+    fn the_local_jar_stays_when_the_manifest_cannot_be_saved() {
+        let root = with_local_sodium();
+        // The manifest is written through this temporary path.
+        fs::create_dir(root.path().join("mods.lock.toml.tmp")).unwrap();
+
+        let (result, out) = run_add(root.path(), &registry(), &request("sodium"));
+        assert!(result.is_err());
+        assert!(!out.contains("replaced"), "{out}");
+        assert!(load(root.path()).get("sodium").unwrap().is_local());
+        assert!(root.path().join("mods-local/sodium-dev.jar").is_file());
+        assert_eq!(
+            git(root.path(), &["ls-files", "mods-local"]),
+            "mods-local/sodium-dev.jar\n"
+        );
+    }
+
+    #[test]
+    fn a_jar_of_mods_local_is_added_as_a_local_mod() {
+        let root = with_local_sodium();
+        let sodium = load(root.path()).get("sodium").unwrap().clone();
+        assert!(sodium.is_local());
+        assert_eq!(sodium.path, "mods-local/sodium-dev.jar");
+        assert!(sodium.platforms.is_empty());
+        assert!(!root.path().join("mods/sodium-dev.jar").exists());
+        assert!(crate::ops::manifest::check(root.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn adding_an_approved_local_jar_again_keeps_its_approval() {
+        let root = with_local_sodium();
+        crate::ops::local::approve(root.path(), "sodium", &mut Vec::new()).unwrap();
+        let jar = root.path().join("mods-local/sodium-dev.jar");
+        let (result, out) = run_add(root.path(), &registry(), &request(jar.to_str().unwrap()));
+        assert_eq!(result.unwrap(), "sodium");
+        assert!(out.contains("already a local mod, approved"), "{out}");
+        assert!(load(root.path()).get("sodium").unwrap().is_approved());
+    }
+
+    #[test]
+    fn adding_the_published_mod_with_deps_replaces_the_local_one() {
+        let root = with_local_sodium();
+        let req = AddRequest {
+            with_deps: true,
+            ..request("sodium")
+        };
+        let (result, out) = run_add(root.path(), &registry(), &req);
+        assert_eq!(result.unwrap(), "sodium");
+        assert!(out.contains("replaced the local mod `sodium`"), "{out}");
+        assert!(!load(root.path()).get("sodium").unwrap().is_local());
+    }
+
+    #[test]
+    fn adding_the_published_mod_replaces_the_local_one_and_its_jar_leaves_git() {
+        let root = with_local_sodium();
+        let modes = fs::read_to_string(root.path().join("modes.toml")).unwrap();
+
+        let (result, out) = run_add(root.path(), &registry(), &request("sodium"));
+        assert_eq!(result.unwrap(), "sodium");
+        assert!(out.contains("replaced the local mod `sodium`"), "{out}");
+        let manifest = load(root.path());
+        assert_eq!(manifest.mods.len(), 1);
+        let sodium = manifest.get("sodium").unwrap();
+        assert!(!sodium.is_local() && sodium.approved.is_none());
+        assert_eq!(sodium.path, "mods/sodium-1.0.0.jar");
+        assert!(sodium.platform("fake").is_some());
+        assert!(!root.path().join("mods-local/sodium-dev.jar").exists());
+        assert_eq!(git(root.path(), &["ls-files", "mods-local"]), "");
+        assert_eq!(
+            fs::read_to_string(root.path().join("modes.toml")).unwrap(),
+            modes
+        );
+    }
+
+    #[test]
+    fn a_jar_named_as_the_jar_of_another_mod_is_refused() {
+        let root = with_local_sodium();
+        // A jar of mods/ named as the local one.
+        let jar = root.path().join("sodium-dev.jar");
+        fs::write(&jar, b"other").unwrap();
+        let err = run_add(root.path(), &registry(), &request(jar.to_str().unwrap()))
+            .0
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Usage);
+        assert!(
+            err.to_string().contains(
+                "mods/sodium-dev.jar has the same file name as mods-local/sodium-dev.jar"
+            ),
+            "{err}"
+        );
+        assert!(!root.path().join("mods/sodium-dev.jar").exists());
+
+        // A mod from a platform whose jar is named as a local mod of
+        // another key.
+        let mut manifest = load(root.path());
+        let mut local = manifest.remove("sodium").unwrap();
+        local.key = "custom".into();
+        local.path = "mods-local/jei-1.0.0.jar".into();
+        manifest.upsert(local);
+        manifest
+            .save(&root.path().join(manifest::FILE_NAME))
+            .unwrap();
+        let err = run_add(root.path(), &registry(), &request("jei"))
+            .0
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("mods/jei-1.0.0.jar has the same file name as mods-local/jei-1.0.0.jar"),
+            "{err}"
+        );
+        assert!(!root.path().join("mods/jei-1.0.0.jar").exists());
+
+        // A local jar named as the jar of a mod of mods/.
+        run_add(root.path(), &registry(), &request("sodium"))
+            .0
+            .unwrap();
+        fs::write(root.path().join("mods-local/sodium-1.0.0.jar"), b"dev").unwrap();
+        let jar = root.path().join("mods-local/sodium-1.0.0.jar");
+        let err = run_add(root.path(), &registry(), &request(jar.to_str().unwrap()))
+            .0
+            .unwrap_err();
+        assert!(
+            err.to_string().contains(
+                "mods-local/sodium-1.0.0.jar has the same file name as mods/sodium-1.0.0.jar"
+            ),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn removing_a_local_mod_takes_its_jar_out_of_git() {
+        let root = with_local_sodium();
+        remove(root.path(), "sodium", &mut Vec::new()).unwrap();
+        assert!(!root.path().join("mods-local/sodium-dev.jar").exists());
+        assert_eq!(git(root.path(), &["ls-files", "mods-local"]), "");
+        assert!(load(root.path()).mods.is_empty());
     }
 
     #[test]

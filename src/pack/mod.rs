@@ -6,6 +6,11 @@
 //! mod it refuses blocks that platform for that mode only. The platform alone
 //! decides, so a mod with no table for a platform (hosted on GitHub, say) may
 //! still be packed for it.
+//!
+//! A local mod (a jar of `mods-local/`) goes into the pack's overrides, as
+//! `overrides/mods/<name>`, for every platform: no platform is asked whether
+//! it is eligible. Every build warns about local mods, approved or not, and
+//! about what each platform says of embedded jars; it never blocks on them.
 
 mod version;
 
@@ -21,9 +26,12 @@ use crate::error::{Context, Error, Result};
 use crate::model::manifest::{self, Entry, Manifest, normalize_key};
 use crate::model::modes::{self, Modes};
 use crate::model::socle::SocleConfig;
+use crate::ops::local::LocalMod;
 use crate::platform::{
     Capability, Eligibility, Operation, Override, PackBuild, Platform, Registry, unsupported,
 };
+use crate::store::hash::hash_file;
+use crate::store::jar_path;
 
 /// Default output directory, relative to the repository root.
 pub const OUT_DIR: &str = "dist";
@@ -45,6 +53,10 @@ pub struct Report {
     pub version: String,
     pub artifacts: Vec<Artifact>,
     pub blocked: Vec<Blocked>,
+    /// The local mods embedded in at least one pack built.
+    pub local: Vec<LocalMod>,
+    /// What to check about the local mods; never blocking.
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -109,10 +121,15 @@ pub fn build(root: &Path, registry: &Registry, request: &Request<'_>) -> Result<
         version: request.version.to_owned(),
         artifacts: Vec::new(),
         blocked: Vec::new(),
+        local: Vec::new(),
+        warnings: Vec::new(),
     };
+    // Local mods embedded so far, each jar checked once against the manifest.
+    let mut embedded: std::collections::BTreeMap<&str, (&Entry, PathBuf)> =
+        std::collections::BTreeMap::new();
     for mode in mode_names {
         let resolved = modes.resolve(mode, &manifest)?;
-        let mods: Vec<&Entry> = resolved
+        let (local, mods): (Vec<&Entry>, Vec<&Entry>) = resolved
             .keys
             .iter()
             .map(|k| {
@@ -120,8 +137,20 @@ pub fn build(root: &Path, registry: &Registry, request: &Request<'_>) -> Result<
                     .get(k)
                     .expect("a resolved mode only holds manifest keys")
             })
-            .collect();
-        let mut overrides = base.clone();
+            .partition(|e| e.is_local());
+        let mut overrides = Vec::new();
+        for entry in local {
+            let source = match embedded.get(entry.key.as_str()) {
+                Some((_, jar)) => jar.clone(),
+                None => local_jar(root, entry)?,
+            };
+            embedded.insert(entry.key.as_str(), (entry, source.clone()));
+            overrides.push(Override {
+                source,
+                path: entry.instance_path(),
+            });
+        }
+        overrides.extend(base.iter().cloned());
         overrides.extend(config_files(
             &root.join("overrides").join(mode).join("config"),
         )?);
@@ -153,7 +182,73 @@ pub fn build(root: &Path, registry: &Registry, request: &Request<'_>) -> Result<
             });
         }
     }
+    // `local_jar` checked each jar against the manifest's hash: the approval
+    // holds when it matches that hash.
+    report.local = embedded
+        .values()
+        .map(|(entry, _)| LocalMod {
+            key: entry.key.clone(),
+            path: entry.path.clone(),
+            approved: entry.is_approved(),
+        })
+        .collect();
+    report.warnings = local_warnings(&report.local, &platforms);
     Ok(report)
+}
+
+/// The jar of a local mod, checked against the manifest: a pack never embeds
+/// a jar other than the one the manifest, and its approval, describe.
+fn local_jar(root: &Path, entry: &Entry) -> Result<PathBuf> {
+    let jar = jar_path(root, entry)?;
+    if !jar.is_file() {
+        return Err(Error::usage(
+            format!(
+                "the jar of the local mod `{}`, {}, is missing",
+                entry.key, entry.path
+            ),
+            format!("restore it with `git checkout -- {}`", entry.path),
+        ));
+    }
+    let hashes = hash_file(&jar).context(format!("reading {}", jar.display()))?;
+    if hashes.sha512 != entry.hashes.sha512 {
+        return Err(Error::usage(
+            format!(
+                "{} changed since {} was generated",
+                entry.path,
+                manifest::FILE_NAME
+            ),
+            format!(
+                "run `modpack manifest`, then `modpack approve {}` once the new jar is reviewed",
+                entry.key
+            ),
+        ));
+    }
+    Ok(jar)
+}
+
+/// One warning per local mod embedded, then one per platform that has
+/// something to say about embedded jars.
+fn local_warnings(local: &[LocalMod], platforms: &[&dyn Platform]) -> Vec<String> {
+    if local.is_empty() {
+        return Vec::new();
+    }
+    let mut warnings: Vec<String> = local
+        .iter()
+        .map(|m| match m.approved {
+            true => format!(
+                "`{}` ({}) is a local mod, embedded in the packs; approved",
+                m.key, m.path
+            ),
+            false => format!("{}; the publish workflow refuses it until then", m.todo()),
+        })
+        .collect();
+    let keys: Vec<&str> = local.iter().map(|m| m.key.as_str()).collect();
+    for platform in platforms {
+        if let Some(note) = platform.embedded_jar_note() {
+            warnings.push(format!("{} ({}): {note}", platform.name(), keys.join(", ")));
+        }
+    }
+    warnings
 }
 
 /// The platform named on the command line, or every one that builds packs by

@@ -48,6 +48,9 @@ pub fn run(args: Args, ctx: &Context) -> Result<()> {
                 a.mode
             );
         }
+        for warning in &report.warnings {
+            println!("warning: {warning}");
+        }
     }
     match report.blocked_error() {
         Some(err) => Err(err),

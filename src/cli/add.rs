@@ -24,6 +24,10 @@ pub struct Args {
     /// in the pack, add only those
     #[arg(long)]
     pub with_deps: bool,
+    /// Replace a local mod even when its jar is not committed in git,
+    /// deleting that jar
+    #[arg(long)]
+    pub force: bool,
 }
 
 pub fn run(args: Args, ctx: &Context) -> Result<()> {
@@ -40,6 +44,7 @@ pub fn run(args: Args, ctx: &Context) -> Result<()> {
         mode: args.mode,
         url: args.url,
         with_deps: args.with_deps,
+        force: args.force,
     };
     add(
         root,

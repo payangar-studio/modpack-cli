@@ -51,6 +51,8 @@ fn entry(project: u64, file: u64) -> Entry {
         file_size: 1,
         downloads: Vec::new(),
         url: None,
+        source: None,
+        approved: None,
         hashes: Hashes {
             sha1: String::new(),
             sha512: String::new(),

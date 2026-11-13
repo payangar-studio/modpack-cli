@@ -164,6 +164,7 @@ fn prepare(
     let mods = dir.join(store::MODS_DIR);
     fs::create_dir_all(&mods).map_err(io_err("creating", &mods))?;
     let mut missing = Vec::new();
+    let mut local_missing = Vec::new();
     // A client-only mod is left out, as a server installed from the .mrpack
     // leaves it out.
     let on_server = mode
@@ -174,7 +175,10 @@ fn prepare(
     for entry in on_server {
         let jar = store::jar_path(root, entry).map_err(reason)?;
         if !jar.is_file() {
-            missing.push(entry.key.as_str());
+            match entry.is_local() {
+                true => local_missing.push(entry.path.as_str()),
+                false => missing.push(entry.key.as_str()),
+            }
             continue;
         }
         let name = jar.file_name().expect("jar_path ends with a file name");
@@ -184,6 +188,15 @@ fn prepare(
         return Err(format!(
             "jars missing from mods/: {}; run `modpack install`",
             missing.join(", ")
+        ));
+    }
+    // Git holds the jars of mods-local/: `modpack install` cannot restore
+    // them.
+    if !local_missing.is_empty() {
+        return Err(format!(
+            "local jars missing from mods-local/: {}; restore them from git with `git checkout -- {}`",
+            local_missing.join(", "),
+            local_missing.join(" ")
         ));
     }
 

@@ -116,6 +116,8 @@ fn entry(section: toml::Table) -> Entry {
         file_size: 0,
         downloads: Vec::new(),
         url: None,
+        source: None,
+        approved: None,
         hashes: Hashes {
             sha1: String::new(),
             sha512: String::new(),

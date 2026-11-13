@@ -9,6 +9,7 @@ use crate::context::Context;
 use crate::error::Result;
 
 pub mod add;
+pub mod approve;
 pub mod auth;
 pub mod init;
 pub mod install;
@@ -84,6 +85,8 @@ pub enum Command {
     },
     /// Store the platform secrets in the system keyring
     Auth(auth::Args),
+    /// Approve a local mod of mods-local/ for publication
+    Approve(approve::Args),
 }
 
 #[derive(Debug, Subcommand)]
@@ -120,6 +123,7 @@ pub fn run(command: Command, ctx: &Context) -> Result<()> {
             PageCommand::Push(args) => page_push::run(args, ctx),
         },
         Command::Auth(args) => auth::run(args, ctx),
+        Command::Approve(args) => approve::run(args, ctx),
     }
 }
 

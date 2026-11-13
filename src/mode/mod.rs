@@ -24,6 +24,7 @@ use crate::model::manifest::{self, Entry, Manifest};
 use crate::model::modes::{self, Modes};
 use crate::model::sha256_file;
 use crate::model::socle::SocleConfig;
+use crate::ops::local::restore_hint;
 use crate::store::download::{Sources, download_all};
 use crate::store::inventory::inventory;
 use crate::store::{MODS_DIR, jar_path, jars_in, write_atomic};
@@ -145,7 +146,7 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
     }
     let mut to_copy = Vec::new();
     for entry in wanted.iter().filter(|e| !present.contains(e.key.as_str())) {
-        to_copy.push((jar_path(root, entry)?, entry.path.clone()));
+        to_copy.push((jar_path(root, entry)?, entry.instance_path()));
     }
 
     // A foreign file where a jar of the mode goes is never overwritten silently.
@@ -295,8 +296,9 @@ fn find_instance(root: &Path, instances_file: &Path) -> Result<PathBuf> {
     })
 }
 
-/// Makes sure the repository's `mods/` holds every jar of the mode, with the
-/// manifest's hashes, downloading the missing ones. Returns their keys.
+/// Makes sure the repository holds every jar of the mode, with the
+/// manifest's hashes, downloading the missing ones into `mods/`. Returns their
+/// keys. A local mod's jar is never downloaded: git holds it.
 fn fill_stock(
     root: &Path,
     manifest: &Manifest,
@@ -304,9 +306,35 @@ fn fill_stock(
     sources: Sources<'_>,
 ) -> Result<Vec<String>> {
     let inv = inventory(root, manifest)?;
+    let local = |key: &String| manifest.get(key).is_some_and(Entry::is_local);
+    // Git holds the jars of mods-local/: neither a download nor
+    // `modpack install` restores them.
+    let local_gaps: Vec<(&Entry, &str)> = [(&inv.missing, "missing"), (&inv.mismatched, "changed")]
+        .into_iter()
+        .flat_map(|(keys, how)| keys.iter().map(move |k| (k, how)))
+        .filter(|(k, _)| local(k))
+        .filter_map(|(k, how)| wanted.iter().find(|e| &e.key == k).map(|e| (*e, how)))
+        .collect();
+    if !local_gaps.is_empty() {
+        let lines: Vec<String> = local_gaps
+            .iter()
+            .map(|(e, how)| format!("{} ({}), {how}", e.key, e.path))
+            .collect();
+        let entries: Vec<&Entry> = local_gaps.iter().map(|(e, _)| *e).collect();
+        return Err(Error::blocked(
+            format!(
+                "local jar(s) of the mode missing from mods-local/ or changed since the manifest:{}",
+                bullets(&lines)
+            ),
+            format!(
+                "{}; run `modpack manifest` instead for a jar you changed on purpose",
+                restore_hint(&entries)
+            ),
+        ));
+    }
     let in_mode = |keys: &[String]| -> Vec<String> {
         keys.iter()
-            .filter(|k| wanted.iter().any(|e| &e.key == *k))
+            .filter(|k| !local(k) && wanted.iter().any(|e| &e.key == *k))
             .cloned()
             .collect()
     };

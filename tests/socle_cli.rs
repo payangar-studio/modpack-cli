@@ -212,8 +212,10 @@ fn update_replaces_a_block_and_keeps_the_text_around_it() {
     // A stale block: the registry records what an older socle wrote.
     let mut lock = SocleLock::load(&root).unwrap();
     let old = "mods/*.jar\n";
-    let text =
-        read(&root, ".gitignore").replace("mods/*.jar\n.source/\n.modpack/local/\ndist/\n", old);
+    let text = read(&root, ".gitignore").replace(
+        "mods/*.jar\n!mods-local/*.jar\n.source/\n.modpack/local/\ndist/\n",
+        old,
+    );
     fs::write(root.join(".gitignore"), text).unwrap();
     lock.files
         .iter_mut()
@@ -242,7 +244,7 @@ fn update_appends_a_missing_block_to_the_end_of_the_file() {
     modpack(&root).arg("update").assert().success();
     assert_eq!(
         read(&root, ".gitignore"),
-        "target/\n\n# modpack:begin\nmods/*.jar\n.source/\n.modpack/local/\ndist/\n# modpack:end\n"
+        "target/\n\n# modpack:begin\nmods/*.jar\n!mods-local/*.jar\n.source/\n.modpack/local/\ndist/\n# modpack:end\n"
     );
 }
 

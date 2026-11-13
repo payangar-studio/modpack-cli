@@ -1,5 +1,5 @@
-//! Building manifest entries from the jars of `mods/`, and regenerating the
-//! manifest from what `mods/` holds.
+//! Building manifest entries from the jars of `mods/` and `mods-local/`, and
+//! regenerating the manifest from what they hold.
 //!
 //! A jar missing from `mods/` means "not installed on this machine", never
 //! "removed from the pack": its entry stays. Only `modpack remove` takes a mod
@@ -8,15 +8,18 @@
 //! An entry is built from its jar: hashes first, then every platform of the
 //! registry is asked to identify the jar, and each platform that knows it
 //! completes the entry. A platform that fails (no network, no API key) is
-//! skipped with a warning: the entry keeps what the others gave.
+//! skipped with a warning: the entry keeps what the others gave. A jar of
+//! `mods-local/` is a local mod: its entry has source `local`, and no
+//! platform is asked about it.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::error::{Context, Result};
-use crate::model::manifest::{self, Entry, Env, Hashes, Manifest, Pack};
+use crate::error::{Context, Error, Result};
+use crate::model::manifest::{self, Entry, Env, Hashes, Manifest, Pack, Source};
 use crate::model::socle::SocleConfig;
 use crate::platform::{Jar, Registry};
+use crate::store::LOCAL_DIR;
 use crate::store::hash::{JarHashes, hash_file};
 use crate::store::inventory::inventory;
 
@@ -31,8 +34,10 @@ pub struct Draft {
 }
 
 impl Draft {
-    /// A draft for the jar at `path` (`mods/<name>`), from its hashes.
+    /// A draft for the jar at `path` (`mods/<name>`, or `mods-local/<name>`
+    /// for a local mod), from its hashes.
     pub fn from_hashes(path: &str, hashes: &JarHashes, key: Option<String>) -> Self {
+        let local = is_local_path(path);
         Self {
             entry: Entry {
                 key: key.clone().unwrap_or_else(|| file_name(path).to_owned()),
@@ -40,6 +45,8 @@ impl Draft {
                 file_size: hashes.size,
                 downloads: Vec::new(),
                 url: None,
+                source: local.then_some(Source::Local),
+                approved: None,
                 hashes: Hashes {
                     sha1: hashes.sha1.clone(),
                     sha512: hashes.sha512.clone(),
@@ -83,14 +90,14 @@ impl Draft {
 }
 
 /// Asks every platform without a table in a draft to identify its jar, then
-/// lets each platform that recognized one complete the entry. Returns the
-/// warnings to show.
+/// lets each platform that recognized one complete the entry. Local mods are
+/// left out. Returns the warnings to show.
 pub fn complete(root: &Path, drafts: &mut [Draft], registry: &Registry) -> Vec<String> {
     let mut warnings = Vec::new();
     for platform in registry.all() {
         let name = platform.name();
         let pending: Vec<usize> = (0..drafts.len())
-            .filter(|&i| drafts[i].entry.platform(name).is_none())
+            .filter(|&i| !drafts[i].entry.is_local() && drafts[i].entry.platform(name).is_none())
             .collect();
         if pending.is_empty() {
             continue;
@@ -166,8 +173,11 @@ pub struct Changes {
     /// Keys of the entries a platform without a table for them now knows,
     /// such as CurseForge once a Core API key is set.
     pub linked: Vec<String>,
-    /// Keys of the new or rebuilt entries no platform knows.
+    /// Keys of the new or rebuilt entries no platform knows, local mods
+    /// aside.
     pub unidentified: Vec<String>,
+    /// Keys of the new or rebuilt local mods: none is approved yet.
+    pub unapproved: Vec<String>,
     pub warnings: Vec<String>,
 }
 
@@ -177,7 +187,8 @@ impl Changes {
     }
 }
 
-/// Rewrites the manifest from `mods/`: new jars are identified and added,
+/// Rewrites the manifest from `mods/` and `mods-local/`: new jars are
+/// identified (a local one is not) and added,
 /// entries whose jar changed are rebuilt under the same key, entries whose jar
 /// is missing are kept and reported, and the platforms an entry has no table
 /// for are asked again. Writes the file only when something
@@ -202,14 +213,24 @@ pub fn regenerate(root: &Path, registry: &Registry) -> Result<Changes> {
         drafts.push(Draft::from_hashes(&jar, &inv.jars[&jar], Some(key.clone())));
     }
     for jar in &inv.unknown {
-        drafts.push(Draft::from_hashes(jar, &inv.jars[jar], None));
+        drafts.push(Draft::from_hashes(
+            jar,
+            &inv.jars[jar],
+            moved_key(&manifest, &inv.missing, jar, &inv.jars[jar]),
+        ));
     }
+    changes
+        .missing
+        .retain(|k| !drafts.iter().any(|d| d.key.as_ref() == Some(k)));
     changes.warnings = complete(root, &mut drafts, registry);
     for draft in drafts {
         let rebuilt = draft.key.is_some();
+        let local = draft.entry.is_local();
         let source = draft.has_source();
         let key = draft.commit(&mut manifest, registry);
-        if !source {
+        if local {
+            changes.unapproved.push(key.clone());
+        } else if !source {
             changes.unidentified.push(key.clone());
         }
         if rebuilt {
@@ -218,11 +239,31 @@ pub fn regenerate(root: &Path, registry: &Registry) -> Result<Changes> {
             changes.added.push(key);
         }
     }
+    check_file_names(&manifest)?;
     changes.linked = link(root, &mut manifest, &inv.present, registry);
     if !existed || !changes.is_empty() {
         manifest.save(&path)?;
     }
     Ok(changes)
+}
+
+/// The key of the entry a new jar of `mods-local/` was moved from: a missing
+/// entry of `mods/` with the same sha512, which the local mod then replaces
+/// under its key instead of sitting beside it.
+fn moved_key(
+    manifest: &Manifest,
+    missing: &[String],
+    jar: &str,
+    hashes: &JarHashes,
+) -> Option<String> {
+    if !is_local_path(jar) {
+        return None;
+    }
+    missing
+        .iter()
+        .filter_map(|k| manifest.get(k))
+        .find(|e| !e.is_local() && e.hashes.sha512 == hashes.sha512)
+        .map(|e| e.key.clone())
 }
 
 /// Asks each platform about the unchanged entries it has no table for, when
@@ -259,7 +300,8 @@ fn link(root: &Path, manifest: &mut Manifest, keys: &[String], registry: &Regist
         .collect()
 }
 
-/// Differences between the manifest and `mods/` that `regenerate` would
+/// Differences between the manifest and `mods/` or `mods-local/` that
+/// `regenerate` would
 /// write, one line each; empty when the manifest is up to date. A missing jar
 /// is not one: the entry stays. Reads the disk only, never the network.
 pub fn check(root: &Path) -> Result<Vec<String>> {
@@ -278,6 +320,51 @@ pub fn check(root: &Path) -> Result<Vec<String>> {
         format!("jar changed: {k} ({path})")
     }));
     Ok(gaps)
+}
+
+/// Refuses two jars of the manifest with the same file name, such as
+/// `mods/foo.jar` and `mods-local/foo.jar`: the instance's `mods/` holds jars
+/// by file name, so one would replace the other.
+pub fn check_file_names(manifest: &Manifest) -> Result<()> {
+    let mut seen: BTreeMap<&str, &Entry> = BTreeMap::new();
+    for entry in &manifest.mods {
+        if let Some(other) = seen.insert(file_name(&entry.path), entry)
+            && other.path != entry.path
+        {
+            return Err(same_file_name(other, &entry.path));
+        }
+    }
+    Ok(())
+}
+
+/// Refuses `path` as the jar of a new entry, or of the entry `key` it
+/// replaces, when another entry's jar has the same file name.
+pub fn check_file_name(manifest: &Manifest, path: &str, key: Option<&str>) -> Result<()> {
+    match manifest.mods.iter().find(|e| {
+        Some(e.key.as_str()) != key && e.path != path && file_name(&e.path) == file_name(path)
+    }) {
+        Some(other) => Err(same_file_name(other, path)),
+        None => Ok(()),
+    }
+}
+
+fn same_file_name(other: &Entry, path: &str) -> Error {
+    Error::usage(
+        format!(
+            "{path} has the same file name as {}, the jar of `{}`: the instance's mods/ holds jars by file name, so one would replace the other",
+            other.path, other.key
+        ),
+        format!(
+            "rename one of the two jars, or take `{}` out with `modpack remove {}`",
+            other.key, other.key
+        ),
+    )
+}
+
+/// Whether `path` is under `mods-local/`.
+fn is_local_path(path: &str) -> bool {
+    path.strip_prefix(LOCAL_DIR)
+        .is_some_and(|rest| rest.starts_with('/'))
 }
 
 fn file_name(path: &str) -> &str {
@@ -338,6 +425,29 @@ pub(crate) mod tests {
 
     fn load(root: &Path) -> Manifest {
         Manifest::load(&root.join(manifest::FILE_NAME)).unwrap()
+    }
+
+    #[test]
+    fn a_local_jar_named_as_a_jar_of_mods_is_refused() {
+        let root = repo();
+        let registry = registry();
+        put(root.path(), "custom.jar", b"v1");
+        regenerate(root.path(), &registry).unwrap();
+        let before = fs::read_to_string(root.path().join(manifest::FILE_NAME)).unwrap();
+        fs::create_dir_all(root.path().join("mods-local")).unwrap();
+        fs::write(root.path().join("mods-local/custom.jar"), b"other").unwrap();
+
+        let err = regenerate(root.path(), &registry).unwrap_err();
+        assert_eq!(err.kind(), crate::error::ErrorKind::Usage);
+        let text = err.to_string();
+        assert!(
+            text.contains("mods-local/custom.jar has the same file name as mods/custom.jar"),
+            "{text}"
+        );
+        assert_eq!(
+            fs::read_to_string(root.path().join(manifest::FILE_NAME)).unwrap(),
+            before
+        );
     }
 
     #[test]
@@ -508,6 +618,74 @@ pub(crate) mod tests {
             regenerate(root.path(), &Registry::new(vec![Box::new(Offline), fake()])).unwrap();
         assert!(changes.is_empty());
         assert!(changes.warnings.is_empty());
+    }
+
+    #[test]
+    fn local_jar_is_picked_up_without_asking_the_platforms() {
+        let root = repo();
+        fs::create_dir_all(root.path().join("mods-local")).unwrap();
+        // The bytes of a mod `fake` hosts: a local mod is still not looked up.
+        fs::write(root.path().join("mods-local/sodium-dev.jar"), b"sodium").unwrap();
+        assert_eq!(
+            check(root.path()).unwrap()[1..],
+            ["new jar: mods-local/sodium-dev.jar"]
+        );
+        let registry = Registry::new(vec![Box::new(Offline)]);
+        let changes = regenerate(root.path(), &registry).unwrap();
+        assert_eq!(changes.added, ["sodium-dev"]);
+        assert_eq!(changes.unapproved, ["sodium-dev"]);
+        assert!(changes.unidentified.is_empty());
+        assert!(changes.warnings.is_empty(), "{:?}", changes.warnings);
+        let entry = load(root.path()).get("sodium-dev").unwrap().clone();
+        assert!(entry.is_local() && !entry.is_approved());
+        assert_eq!(entry.path, "mods-local/sodium-dev.jar");
+        assert!(entry.platforms.is_empty() && entry.downloads.is_empty());
+        assert_eq!(entry.file_size, 6);
+        assert!(check(root.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_jar_moved_from_mods_to_mods_local_keeps_its_key() {
+        let root = repo();
+        fs::write(root.path().join("mods/by-hand.jar"), b"unknown").unwrap();
+        regenerate(root.path(), &registry()).unwrap();
+        assert!(!load(root.path()).get("by-hand").unwrap().is_local());
+
+        fs::create_dir_all(root.path().join("mods-local")).unwrap();
+        fs::rename(
+            root.path().join("mods/by-hand.jar"),
+            root.path().join("mods-local/by-hand.jar"),
+        )
+        .unwrap();
+        let changes = regenerate(root.path(), &registry()).unwrap();
+        assert_eq!(changes.rebuilt, ["by-hand"]);
+        assert!(changes.added.is_empty() && changes.missing.is_empty());
+        let manifest = load(root.path());
+        assert_eq!(manifest.mods.len(), 1);
+        let entry = manifest.get("by-hand").unwrap();
+        assert!(entry.is_local());
+        assert_eq!(entry.path, "mods-local/by-hand.jar");
+    }
+
+    #[test]
+    fn a_changed_local_jar_loses_its_approval() {
+        let root = repo();
+        fs::create_dir_all(root.path().join("mods-local")).unwrap();
+        fs::write(root.path().join("mods-local/custom.jar"), b"v1").unwrap();
+        regenerate(root.path(), &registry()).unwrap();
+        let path = root.path().join(manifest::FILE_NAME);
+        let mut manifest = load(root.path());
+        let custom = manifest.get_mut("custom").unwrap();
+        custom.approved = Some(custom.hashes.sha512.clone());
+        manifest.save(&path).unwrap();
+
+        fs::write(root.path().join("mods-local/custom.jar"), b"v2").unwrap();
+        let changes = regenerate(root.path(), &registry()).unwrap();
+        assert_eq!(changes.rebuilt, ["custom"]);
+        assert_eq!(changes.unapproved, ["custom"]);
+        let custom = load(root.path()).get("custom").unwrap().clone();
+        assert!(custom.is_local());
+        assert_eq!(custom.approved, None);
     }
 
     #[test]

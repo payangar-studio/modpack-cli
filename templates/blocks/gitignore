@@ -1,4 +1,5 @@
 mods/*.jar
+!mods-local/*.jar
 .source/
 .modpack/local/
 dist/

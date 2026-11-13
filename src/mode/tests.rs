@@ -386,6 +386,32 @@ fn running_minecraft_is_refused_and_nothing_is_written() {
 }
 
 #[test]
+fn a_config_file_the_cli_did_not_write_blocks_unless_it_matches() {
+    let s = Setup::new();
+    // Created by the game before any load: same content is adopted silently.
+    write(&s.instance(), "config/sub/b.toml", "base b");
+    write(&s.instance(), "config/a.toml", "the game's own a");
+
+    let err = s.load(modes::DEFAULT_MODE, false).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Blocked);
+    let text = err.to_string();
+    assert!(
+        text.contains("1 config file(s) of the instance that modpack-cli did not write")
+            && text.contains("\n  - config/a.toml"),
+        "{text}"
+    );
+    assert!(err.hint().contains("--force"));
+    assert_eq!(s.read("config/a.toml"), "the game's own a");
+    assert!(s.jars().is_empty());
+
+    let report = s.load(modes::DEFAULT_MODE, true).unwrap();
+    assert_eq!(report.forced, ["config/a.toml"]);
+    assert_eq!(s.read("config/a.toml"), "base a");
+    assert!(s.state().files.contains_key("config/sub/b.toml"));
+    assert!(s.load(modes::DEFAULT_MODE, false).is_ok());
+}
+
+#[test]
 fn mode_config_overrides_only_the_files_it_has() {
     let s = Setup::new();
     write(&s.instance(), "config/other.toml", "the instance's own");

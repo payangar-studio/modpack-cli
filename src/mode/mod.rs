@@ -22,6 +22,7 @@ use crate::launcher::running::GameDetector;
 use crate::model::instance::{self, DISABLED_SUFFIX, InstanceState, Instances, disabled_in_app};
 use crate::model::manifest::{self, Entry, Manifest};
 use crate::model::modes::{self, Modes};
+use crate::model::sha256_file;
 use crate::model::socle::SocleConfig;
 use crate::store::download::{Sources, download_all};
 use crate::store::inventory::inventory;
@@ -165,6 +166,27 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
     }
     unknown.retain(|rel| !in_the_way.contains(rel));
 
+    // Nor is a config file of the instance the CLI never wrote, such as one
+    // the game created, when the mode has other content for it.
+    let configs = config_files(root, mode)?;
+    let mut foreign = Vec::new();
+    for (rel, source) in &configs {
+        let dest = instance.join(rel);
+        if !state.files.contains_key(rel) && dest.is_file() && !same_content(source, &dest)? {
+            foreign.push(rel.clone());
+        }
+    }
+    if !foreign.is_empty() && !force {
+        return Err(Error::blocked(
+            format!(
+                "{} config file(s) of the instance that modpack-cli did not write differ from the mode's:{}",
+                foreign.len(),
+                bullets(&foreign)
+            ),
+            "bring the changes you want to keep into the repository, then rerun with --force to overwrite them",
+        ));
+    }
+
     let downloaded = fill_stock(root, &manifest, &wanted, ctx.sources)?;
 
     let mut report = LoadReport {
@@ -172,7 +194,11 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
         instance: instance.clone(),
         downloaded,
         unknown,
-        forced: drifted.into_iter().chain(in_the_way).collect(),
+        forced: drifted
+            .into_iter()
+            .chain(in_the_way)
+            .chain(foreign)
+            .collect(),
         ..Default::default()
     };
     report.forced.sort();
@@ -195,7 +221,6 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
         fs::remove_file(&path).context(format!("removing {}", path.display()))?;
     }
 
-    let configs = config_files(root, mode)?;
     for (rel, source) in &configs {
         copy_file(source, &instance.join(rel))?;
         new_state.record(&instance, rel)?;
@@ -347,6 +372,11 @@ fn walk(dir: &Path, prefix: &str, files: &mut BTreeMap<String, PathBuf>) -> Resu
         }
     }
     Ok(())
+}
+
+fn same_content(a: &Path, b: &Path) -> Result<bool> {
+    let hash = |p: &Path| sha256_file(p).context(format!("reading {}", p.display()));
+    Ok(hash(a)? == hash(b)?)
 }
 
 /// Copies through a temporary file then a rename, so that a crash never

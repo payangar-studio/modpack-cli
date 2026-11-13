@@ -24,6 +24,7 @@ use super::{
 };
 use crate::error::{Context, Error, Result};
 use crate::model::manifest::{Entry, Pack};
+use crate::secrets::{SecretName, Secrets};
 
 pub use fingerprint::fingerprint;
 
@@ -33,10 +34,18 @@ pub const NAME: &str = "curseforge";
 const BASE_URL: &str = "https://api.curseforge.com";
 const KEY_VAR: &str = "MODPACK_CURSEFORGE_API_KEY";
 
-/// The Core API key, if one is set. Reads the environment only, until the
-/// secrets module (environment, then keyring) replaces it.
+/// The Core API key, if one is set: the environment, then the system keyring
+/// where `modpack auth` stores it.
 pub fn api_key() -> Option<String> {
-    std::env::var(KEY_VAR).ok().filter(|k| !k.trim().is_empty())
+    match Secrets::system().find(SecretName::CurseforgeApiKey) {
+        Ok(found) => found
+            .map(|(key, _)| key.expose().to_owned())
+            .filter(|k| !k.trim().is_empty()),
+        Err(err) => {
+            warn!("{err}");
+            None
+        }
+    }
 }
 
 pub struct CurseForge {

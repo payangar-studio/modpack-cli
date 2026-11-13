@@ -3,7 +3,8 @@
 //! The server of the pack's loader and Minecraft version is installed once
 //! into the machine's cache, with the loader's official installer. Each check
 //! then copies it into a temporary directory under the cache (hard links when
-//! the filesystem allows), adds the mode's jars, the base config then the
+//! the filesystem allows), adds the mode's jars but the client-only ones
+//! (`env.server = "unsupported"`), the base config then the
 //! mode's overrides, accepts the EULA, and starts the server without its
 //! interface until the `Done` line of its log.
 
@@ -22,7 +23,7 @@ use serde::de::DeserializeOwned;
 
 use super::Status;
 use crate::error::{Error, Result};
-use crate::model::manifest::{Manifest, Pack};
+use crate::model::manifest::{Manifest, Pack, Support};
 use crate::model::modes::Resolved;
 use crate::store::{self, download::Fetch};
 use loader::Loader;
@@ -163,7 +164,14 @@ fn prepare(
     let mods = dir.join(store::MODS_DIR);
     fs::create_dir_all(&mods).map_err(io_err("creating", &mods))?;
     let mut missing = Vec::new();
-    for entry in mode.keys.iter().filter_map(|k| manifest.get(k)) {
+    // A client-only mod is left out, as a server installed from the .mrpack
+    // leaves it out.
+    let on_server = mode
+        .keys
+        .iter()
+        .filter_map(|k| manifest.get(k))
+        .filter(|e| e.env.server != Support::Unsupported);
+    for entry in on_server {
         let jar = store::jar_path(root, entry).map_err(reason)?;
         if !jar.is_file() {
             missing.push(entry.key.as_str());

@@ -256,6 +256,26 @@ read cmd
     }
 
     #[test]
+    fn client_only_mods_are_left_out_of_the_server() {
+        let setup = Setup::new();
+        let r = setup.repo.path();
+        fs::write(r.join("mods/gamma-1.0.0.jar"), b"gamma").unwrap();
+        let mut m = pack_manifest("fabric", "0.16.9");
+        let mut gamma = entry("gamma", b"gamma");
+        gamma.env.server = Support::Unsupported;
+        m.upsert(gamma);
+        let server = checking_server("-jar fabric-server-launch.jar nogui").replace(
+            DONE,
+            &format!(
+                "[ ! -e mods/gamma-1.0.0.jar ] || {{ echo 'client-only mod'; exit 1; }}\n{DONE}"
+            ),
+        );
+        let java = setup.java(21, &server);
+        let status = setup.check(java, &fabric_fetch(), &m, &["alpha", "beta", "gamma"]);
+        assert_eq!(status, Status::Passed, "calls: {}", setup.calls());
+    }
+
+    #[test]
     fn crashing_server_fails_with_its_log() {
         let setup = Setup::new();
         let java = setup.java(

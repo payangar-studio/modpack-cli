@@ -15,7 +15,7 @@ use std::io::Write;
 use std::path::Path;
 
 use super::local::{jar_committed, remove_jar};
-use super::manifest::{Draft, complete, first_line, load_or_new};
+use super::manifest::{Draft, check_file_name, complete, first_line, load_or_new};
 use super::modes_edit;
 use crate::error::{Context, Error, Result};
 use crate::model::manifest::{self, Entry, Env, Hashes, Manifest, Pack, normalize_key};
@@ -241,6 +241,7 @@ fn add_local(
         return add_tracked(root, sources, manifest, name, out);
     }
     let rel = format!("{MODS_DIR}/{name}");
+    check_file_name(manifest, &rel, None)?;
     let dest = root.join(MODS_DIR).join(name);
     let same_file = dest.is_file()
         && fs::canonicalize(source).context("reading the jar")?
@@ -315,6 +316,7 @@ fn add_tracked(
     out: &mut dyn Write,
 ) -> Result<String> {
     let rel = format!("{LOCAL_DIR}/{name}");
+    check_file_name(manifest, &rel, None)?;
     let kept = manifest.mods.iter().find(|e| e.path == rel).cloned();
     let mut draft = Draft::from_jar(root, &rel, kept.as_ref().map(|e| e.key.clone()))?;
     // The same jar again keeps its approval: only a changed jar loses it.
@@ -378,6 +380,7 @@ fn add_remote(
             format!("remove `{}` first with `modpack remove`", other.key),
         ));
     }
+    check_file_name(manifest, &rel, previous.as_ref().map(|p| p.key.as_str()))?;
     if let Some(local) = previous.as_ref().filter(|p| p.is_local())
         && !edit.force
         && jar_path(root, local)?.is_file()
@@ -1339,6 +1342,61 @@ mod tests {
         assert_eq!(
             fs::read_to_string(root.path().join("modes.toml")).unwrap(),
             modes
+        );
+    }
+
+    #[test]
+    fn a_jar_named_as_the_jar_of_another_mod_is_refused() {
+        let root = with_local_sodium();
+        // A jar of mods/ named as the local one.
+        let jar = root.path().join("sodium-dev.jar");
+        fs::write(&jar, b"other").unwrap();
+        let err = run_add(root.path(), &registry(), &request(jar.to_str().unwrap()))
+            .0
+            .unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Usage);
+        assert!(
+            err.to_string().contains(
+                "mods/sodium-dev.jar has the same file name as mods-local/sodium-dev.jar"
+            ),
+            "{err}"
+        );
+        assert!(!root.path().join("mods/sodium-dev.jar").exists());
+
+        // A mod from a platform whose jar is named as a local mod of
+        // another key.
+        let mut manifest = load(root.path());
+        let mut local = manifest.remove("sodium").unwrap();
+        local.key = "custom".into();
+        local.path = "mods-local/jei-1.0.0.jar".into();
+        manifest.upsert(local);
+        manifest
+            .save(&root.path().join(manifest::FILE_NAME))
+            .unwrap();
+        let err = run_add(root.path(), &registry(), &request("jei"))
+            .0
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("mods/jei-1.0.0.jar has the same file name as mods-local/jei-1.0.0.jar"),
+            "{err}"
+        );
+        assert!(!root.path().join("mods/jei-1.0.0.jar").exists());
+
+        // A local jar named as the jar of a mod of mods/.
+        run_add(root.path(), &registry(), &request("sodium"))
+            .0
+            .unwrap();
+        fs::write(root.path().join("mods-local/sodium-1.0.0.jar"), b"dev").unwrap();
+        let jar = root.path().join("mods-local/sodium-1.0.0.jar");
+        let err = run_add(root.path(), &registry(), &request(jar.to_str().unwrap()))
+            .0
+            .unwrap_err();
+        assert!(
+            err.to_string().contains(
+                "mods-local/sodium-1.0.0.jar has the same file name as mods/sodium-1.0.0.jar"
+            ),
+            "{err}"
         );
     }
 

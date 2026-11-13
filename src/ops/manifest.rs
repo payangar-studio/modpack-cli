@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::error::{Context, Result};
+use crate::error::{Context, Error, Result};
 use crate::model::manifest::{self, Entry, Env, Hashes, Manifest, Pack, Source};
 use crate::model::socle::SocleConfig;
 use crate::platform::{Jar, Registry};
@@ -239,6 +239,7 @@ pub fn regenerate(root: &Path, registry: &Registry) -> Result<Changes> {
             changes.added.push(key);
         }
     }
+    check_file_names(&manifest)?;
     changes.linked = link(root, &mut manifest, &inv.present, registry);
     if !existed || !changes.is_empty() {
         manifest.save(&path)?;
@@ -321,6 +322,45 @@ pub fn check(root: &Path) -> Result<Vec<String>> {
     Ok(gaps)
 }
 
+/// Refuses two jars of the manifest with the same file name, such as
+/// `mods/foo.jar` and `mods-local/foo.jar`: the instance's `mods/` holds jars
+/// by file name, so one would replace the other.
+pub fn check_file_names(manifest: &Manifest) -> Result<()> {
+    let mut seen: BTreeMap<&str, &Entry> = BTreeMap::new();
+    for entry in &manifest.mods {
+        if let Some(other) = seen.insert(file_name(&entry.path), entry)
+            && other.path != entry.path
+        {
+            return Err(same_file_name(other, &entry.path));
+        }
+    }
+    Ok(())
+}
+
+/// Refuses `path` as the jar of a new entry, or of the entry `key` it
+/// replaces, when another entry's jar has the same file name.
+pub fn check_file_name(manifest: &Manifest, path: &str, key: Option<&str>) -> Result<()> {
+    match manifest.mods.iter().find(|e| {
+        Some(e.key.as_str()) != key && e.path != path && file_name(&e.path) == file_name(path)
+    }) {
+        Some(other) => Err(same_file_name(other, path)),
+        None => Ok(()),
+    }
+}
+
+fn same_file_name(other: &Entry, path: &str) -> Error {
+    Error::usage(
+        format!(
+            "{path} has the same file name as {}, the jar of `{}`: the instance's mods/ holds jars by file name, so one would replace the other",
+            other.path, other.key
+        ),
+        format!(
+            "rename one of the two jars, or take `{}` out with `modpack remove {}`",
+            other.key, other.key
+        ),
+    )
+}
+
 /// Whether `path` is under `mods-local/`.
 fn is_local_path(path: &str) -> bool {
     path.strip_prefix(LOCAL_DIR)
@@ -385,6 +425,29 @@ pub(crate) mod tests {
 
     fn load(root: &Path) -> Manifest {
         Manifest::load(&root.join(manifest::FILE_NAME)).unwrap()
+    }
+
+    #[test]
+    fn a_local_jar_named_as_a_jar_of_mods_is_refused() {
+        let root = repo();
+        let registry = registry();
+        put(root.path(), "custom.jar", b"v1");
+        regenerate(root.path(), &registry).unwrap();
+        let before = fs::read_to_string(root.path().join(manifest::FILE_NAME)).unwrap();
+        fs::create_dir_all(root.path().join("mods-local")).unwrap();
+        fs::write(root.path().join("mods-local/custom.jar"), b"other").unwrap();
+
+        let err = regenerate(root.path(), &registry).unwrap_err();
+        assert_eq!(err.kind(), crate::error::ErrorKind::Usage);
+        let text = err.to_string();
+        assert!(
+            text.contains("mods-local/custom.jar has the same file name as mods/custom.jar"),
+            "{text}"
+        );
+        assert_eq!(
+            fs::read_to_string(root.path().join(manifest::FILE_NAME)).unwrap(),
+            before
+        );
     }
 
     #[test]

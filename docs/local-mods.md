@@ -6,6 +6,8 @@ A local mod is a jar no platform serves: an abandoned mod, a build of a mod unde
 
 Drop the jar into `mods-local/`. `modpack manifest`, which the `pre-commit` hook runs, adds it to `mods.lock.toml`, and the hook adds the jars of `mods-local/` to the commit. `modpack add mods-local/<jar>` does the same at once.
 
+The instance's `mods/` holds every jar by its file name, so a jar of `mods-local/` cannot share its file name with a jar of `mods/` or of another entry: `modpack manifest` and `modpack add` refuse it, naming both files. Rename one of them.
+
 The entry has source `local`, its path in `mods-local/`, its hashes and size, and no download URL. No platform is asked about it, so a commit works offline. Its sides are `required` on both, as for any jar no platform describes. It stays in the one manifest that modes, `modpack test` and `modpack pack` read: modes name it by its key like any other mod.
 
 `modpack install` never downloads a local mod, git holds it; it reports the jar as failed when it is missing from `mods-local/`. `modpack mode load` (and the reload after `install`) copies it from `mods-local/` into the instance's `mods/`.

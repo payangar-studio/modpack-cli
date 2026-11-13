@@ -36,10 +36,10 @@ pub struct Cli {
 #[derive(Debug, clap::Args)]
 pub struct Verbosity {
     /// More logs on stderr (-v info, -vv debug, -vvv trace)
-    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
+    #[arg(short, long, action = clap::ArgAction::Count, global = true, help_heading = "Global options")]
     pub verbose: u8,
     /// Fewer logs on stderr (-q errors only, -qq none)
-    #[arg(short, long, action = clap::ArgAction::Count, global = true, conflicts_with = "verbose")]
+    #[arg(short, long, action = clap::ArgAction::Count, global = true, conflicts_with = "verbose", help_heading = "Global options")]
     pub quiet: u8,
 }
 

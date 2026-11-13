@@ -21,6 +21,7 @@ With `--json`, the report is one JSON object on stdout. This format is the contr
 | `instance.path` | Absolute path of the instance directory. Its `logs/` and `crash-reports/` are there. |
 | `instance.mode` | Mode loaded last, or `null` before the first `modpack mode load`. |
 | `instance.drift` | Files the CLI wrote into the instance that changed or were deleted since, relative to the instance, with `/` separators. |
+| `instance.disabled` | Jars of `drift` that the Modrinth App disabled: renamed `<jar>.disabled`, content unchanged. `modpack mode load <mode> --force` enables them again. |
 | `instance.unknown_jars` | Jars of the instance's `mods/` whose sha1 and sha512 match no manifest entry, whatever their file name, with their hashes so they can be looked up on the platforms. |
 | `missing_jars` | Manifest entries whose jar is absent from `mods/` of the repository, or replaced by an older jar `modpack install` downloaded and nobody changed since: `modpack install` downloads them. |
 | `manifest.stale` | `true` when `new_jars` or `changed` is not empty: `modpack manifest` regenerates the manifest. |
@@ -61,11 +62,12 @@ JSON Schema (draft 2020-12). It describes this version exactly. A later version 
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["path", "mode", "drift", "unknown_jars"],
+          "required": ["path", "mode", "drift", "disabled", "unknown_jars"],
           "properties": {
             "path": { "type": "string" },
             "mode": { "type": ["string", "null"] },
             "drift": { "type": "array", "items": { "type": "string" } },
+            "disabled": { "type": "array", "items": { "type": "string" } },
             "unknown_jars": {
               "type": "array",
               "items": {
@@ -120,6 +122,7 @@ An instance where a config file was changed in game and a mod was tried from the
     "path": "/home/me/.local/share/ModrinthApp/profiles/My Pack",
     "mode": "default",
     "drift": ["config/jei-client.toml"],
+    "disabled": [],
     "unknown_jars": [
       {
         "path": "mods/appleskin-neoforge-mc1.21-3.0.5.jar",

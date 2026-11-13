@@ -135,6 +135,23 @@ pub fn drift(instance_dir: &Path, state: &InstanceState) -> Result<Vec<PathBuf>>
     Ok(drifted)
 }
 
+/// Suffix the Modrinth App adds to the jar of a mod it disables.
+pub const DISABLED_SUFFIX: &str = ".disabled";
+
+/// Whether a file the CLI wrote is gone from its path but sits next to it as
+/// `<file>.disabled`, with the content the CLI wrote: a mod disabled in the
+/// Modrinth App.
+pub fn disabled_in_app(instance_dir: &Path, state: &InstanceState, relative: &str) -> Result<bool> {
+    let Some(expected) = state.files.get(relative) else {
+        return Ok(false);
+    };
+    if instance_dir.join(relative).exists() {
+        return Ok(false);
+    }
+    let disabled = instance_dir.join(format!("{relative}{DISABLED_SUFFIX}"));
+    Ok(disabled.is_file() && hash(&disabled)? == *expected)
+}
+
 fn hash(path: &Path) -> Result<String> {
     super::sha256_file(path).map_err(|e| {
         Error::internal(
@@ -191,6 +208,27 @@ mod tests {
             drift(dir.path(), &state).unwrap(),
             [PathBuf::from("mods/jei.jar")]
         );
+    }
+
+    #[test]
+    fn jar_renamed_by_the_app_is_disabled_drift() {
+        let (dir, state) = instance();
+        assert!(!disabled_in_app(dir.path(), &state, "mods/jei.jar").unwrap());
+        fs::rename(
+            dir.path().join("mods/jei.jar"),
+            dir.path().join("mods/jei.jar.disabled"),
+        )
+        .unwrap();
+        assert_eq!(
+            drift(dir.path(), &state).unwrap(),
+            [PathBuf::from("mods/jei.jar")]
+        );
+        assert!(disabled_in_app(dir.path(), &state, "mods/jei.jar").unwrap());
+
+        // Another file under that name is not the CLI's jar disabled.
+        fs::write(dir.path().join("mods/jei.jar.disabled"), b"other").unwrap();
+        assert!(!disabled_in_app(dir.path(), &state, "mods/jei.jar").unwrap());
+        assert!(!disabled_in_app(dir.path(), &state, "mods/unknown.jar").unwrap());
     }
 
     #[test]

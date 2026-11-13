@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{Context, Error, Result};
 use crate::launcher::running::GameDetector;
-use crate::model::instance::{self, InstanceState, Instances};
+use crate::model::instance::{self, DISABLED_SUFFIX, InstanceState, Instances, disabled_in_app};
 use crate::model::manifest::{self, Entry, Manifest};
 use crate::model::modes::{self, Modes};
 use crate::model::socle::SocleConfig;
@@ -90,12 +90,25 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
+    let mut disabled = Vec::new();
+    for rel in &drifted {
+        if disabled_in_app(&instance, &state, rel)? {
+            disabled.push(rel.clone());
+        }
+    }
     if !drifted.is_empty() && !force {
+        let described: Vec<String> = drifted
+            .iter()
+            .map(|rel| match disabled.contains(rel) {
+                true => format!("{rel} (disabled in the app)"),
+                false => rel.clone(),
+            })
+            .collect();
         return Err(Error::blocked(
             format!(
                 "{} file(s) of the instance changed since modpack-cli wrote them:{}",
                 drifted.len(),
-                bullets(&drifted)
+                bullets(&described)
             ),
             "bring the changes you want to keep into the repository, then rerun with --force to overwrite them",
         ));
@@ -174,6 +187,12 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
         copy_file(&source, &instance.join(&rel))?;
         new_state.record(&instance, &rel)?;
         report.copied.push(rel);
+    }
+    // Forced past a jar the app disabled: the repository wins, so the jar is
+    // back (when the mode has it) and its disabled copy goes.
+    for rel in disabled {
+        let path = instance.join(format!("{rel}{DISABLED_SUFFIX}"));
+        fs::remove_file(&path).context(format!("removing {}", path.display()))?;
     }
 
     let configs = config_files(root, mode)?;

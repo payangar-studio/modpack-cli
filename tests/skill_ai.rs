@@ -192,6 +192,32 @@ fn the_audit_skill_records_the_audited_commit() {
     }
 }
 
+/// Two clones audited at once never share the build directory, and git
+/// ignores it.
+#[test]
+fn the_audit_skill_builds_inside_the_repository() {
+    let text = skill_template("modpack-audit");
+    assert!(!text.contains("/tmp"), "a path shared between clones");
+    assert!(
+        text.contains("modpack pack --out .modpack/local/audit --json"),
+        "build directory"
+    );
+    let (_tmp, root) = init_repo();
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(&root)
+            .status()
+            .unwrap()
+            .success()
+    };
+    assert!(git(&["init", "--quiet"]));
+    assert!(
+        git(&["check-ignore", "--quiet", ".modpack/local/audit/x.mrpack"]),
+        ".modpack/local/audit/ is not ignored by git"
+    );
+}
+
 #[test]
 fn init_lays_down_the_skills_and_the_block() {
     let (_tmp, root) = init_repo();

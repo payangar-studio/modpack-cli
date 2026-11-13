@@ -5,19 +5,17 @@
 //! Computing it reads files only: nothing is written, nothing goes to the
 //! network. The JSON form is a contract, documented in `docs/status.md`.
 
-use std::fs;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::Serialize;
 
-use crate::error::{Context, Result};
+use crate::error::Result;
 use crate::model::instance::{InstanceState, Instances, drift};
 use crate::model::manifest::{self, Manifest};
 use crate::model::socle::{SocleConfig, VersionCheck, cli_version, compare_versions};
-use crate::store::MODS_DIR;
-use crate::store::hash::hash_file;
 use crate::store::inventory::inventory;
+use crate::store::{MODS_DIR, jars_in};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Status {
@@ -109,11 +107,8 @@ pub fn status(root: &Path, instances_file: &Path) -> Result<Status> {
     };
     let changed = jars(&inv.mismatched);
 
-    let instance = match Instances::load(instances_file)?
-        .get(&config.init.name)
-        .filter(|dir| dir.is_dir())
-    {
-        Some(dir) => Some(instance(dir, &manifest)?),
+    let instance = match Instances::existing(instances_file, &config.init.name)? {
+        Some(dir) => Some(instance(&dir, &manifest)?),
         None => None,
     };
 
@@ -140,8 +135,7 @@ fn instance(dir: &Path, manifest: &Manifest) -> Result<Instance> {
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
     let mut unknown_jars = Vec::new();
-    for (path, relative) in jars_of(&dir.join(MODS_DIR))? {
-        let hashes = hash_file(&path).context(format!("reading {}", path.display()))?;
+    for (relative, hashes) in jars_in(&dir.join(MODS_DIR))? {
         if !manifest.mods.iter().any(|e| hashes.matches(&e.hashes)) {
             unknown_jars.push(UnknownJar {
                 path: relative,
@@ -156,26 +150,6 @@ fn instance(dir: &Path, manifest: &Manifest) -> Result<Instance> {
         drift,
         unknown_jars,
     })
-}
-
-/// The `.jar` files of a directory, with their path as `mods/<name>`, sorted.
-/// A missing directory holds none.
-fn jars_of(dir: &Path) -> Result<Vec<(PathBuf, String)>> {
-    let listing = match fs::read_dir(dir) {
-        Ok(listing) => listing,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(e).context(format!("reading {}", dir.display())),
-    };
-    let mut jars = Vec::new();
-    for item in listing {
-        let item = item.context(format!("reading {}", dir.display()))?;
-        let name = item.file_name().to_string_lossy().into_owned();
-        if name.to_ascii_lowercase().ends_with(".jar") && item.path().is_file() {
-            jars.push((item.path(), format!("{MODS_DIR}/{name}")));
-        }
-    }
-    jars.sort_by(|a, b| a.1.cmp(&b.1));
-    Ok(jars)
 }
 
 impl Status {
@@ -265,6 +239,8 @@ mod tests {
     use crate::model::socle::InitValues;
     use crate::store::download::tests::{entry, manifest};
     use std::collections::BTreeMap;
+    use std::fs;
+    use std::path::PathBuf;
 
     const PACK: &str = "Test Pack";
 

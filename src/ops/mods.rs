@@ -20,7 +20,7 @@ use crate::platform::{Candidate, Download, Platform};
 use crate::prompt::Prompt;
 use crate::store::download::{Sources, download};
 use crate::store::hash::{copy_hashing, hash_file};
-use crate::store::{MODS_DIR, jar_path};
+use crate::store::{MODS_DIR, jar_path, write_atomic};
 
 /// Fields a platform table names its project by: `project_id` for Modrinth,
 /// `projectID` for CurseForge, `id` for the test platform. A table's
@@ -394,17 +394,9 @@ fn fetch(
         Download::Url(url) => sources.fetch.get(&url)?,
         Download::Stream(stream) => stream,
     };
-    let dir = dest.parent().expect("a jar path is under mods/");
-    fs::create_dir_all(dir).context(format!("creating {}", dir.display()))?;
-    let mut tmp = tempfile::Builder::new()
-        .prefix(".")
-        .suffix(".part")
-        .tempfile_in(dir)
-        .context(format!("creating a temporary file in {}", dir.display()))?;
-    let hashes = copy_hashing(&mut reader, tmp.as_file_mut()).context("receiving the jar")?;
-    tmp.persist(&dest)
-        .map_err(|e| e.error)
-        .context(format!("writing {}", dest.display()))?;
+    let hashes = write_atomic(&dest, |file| {
+        copy_hashing(&mut reader, file).context("receiving the jar")
+    })?;
     entry.hashes = Hashes {
         sha1: hashes.sha1,
         sha512: hashes.sha512,

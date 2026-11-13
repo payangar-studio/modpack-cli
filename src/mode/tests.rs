@@ -122,7 +122,7 @@ impl Setup {
 
     /// Jar files of the instance's `mods/`, sorted.
     fn jars(&self) -> Vec<String> {
-        instance_jars(&self.instance())
+        jars_in(&self.instance().join(MODS_DIR))
             .unwrap()
             .into_keys()
             .collect()

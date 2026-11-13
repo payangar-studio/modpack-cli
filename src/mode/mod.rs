@@ -24,9 +24,8 @@ use crate::model::manifest::{self, Entry, Manifest};
 use crate::model::modes::{self, Modes};
 use crate::model::socle::SocleConfig;
 use crate::store::download::{Sources, download_all};
-use crate::store::hash::{JarHashes, hash_file};
 use crate::store::inventory::inventory;
-use crate::store::{MODS_DIR, jar_path};
+use crate::store::{MODS_DIR, jar_path, jars_in, write_atomic};
 
 /// Base config, in the repository and in the instance.
 pub const CONFIG_DIR: &str = "config";
@@ -117,7 +116,7 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
     let mut present = BTreeSet::new();
     let mut to_remove = Vec::new();
     let mut unknown = Vec::new();
-    for (rel, hashes) in instance_jars(&instance)? {
+    for (rel, hashes) in jars_in(&instance.join(MODS_DIR))? {
         match manifest.mods.iter().find(|e| hashes.matches(&e.hashes)) {
             Some(e) if in_mode.contains(e.key.as_str()) => {
                 present.insert(e.key.as_str());
@@ -207,9 +206,9 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
 /// instance here and a mode was loaded into it.
 pub fn loaded_mode(root: &Path, instances_file: &Path) -> Result<Option<String>> {
     let name = SocleConfig::load(root)?.init.name;
-    match Instances::load(instances_file)?.get(&name) {
-        Some(dir) if dir.is_dir() => Ok(InstanceState::load(dir)?.mode),
-        _ => Ok(None),
+    match Instances::existing(instances_file, &name)? {
+        Some(dir) => Ok(InstanceState::load(&dir)?.mode),
+        None => Ok(None),
     }
 }
 
@@ -241,13 +240,12 @@ fn load_manifest(root: &Path) -> Result<Manifest> {
 
 fn find_instance(root: &Path, instances_file: &Path) -> Result<PathBuf> {
     let name = SocleConfig::load(root)?.init.name;
-    match Instances::load(instances_file)?.get(&name) {
-        Some(dir) if dir.is_dir() => Ok(dir.to_owned()),
-        _ => Err(Error::usage(
+    Instances::existing(instances_file, &name)?.ok_or_else(|| {
+        Error::usage(
             format!("the pack `{name}` has no Modrinth instance on this machine"),
             "run `modpack setup` to create it",
-        )),
-    }
+        )
+    })
 }
 
 /// Makes sure the repository's `mods/` holds every jar of the mode, with the
@@ -294,28 +292,6 @@ fn fill_stock(
     Ok(missing)
 }
 
-/// Every jar directly under the instance's `mods/`, as `mods/<name>`.
-fn instance_jars(instance: &Path) -> Result<BTreeMap<String, JarHashes>> {
-    let dir = instance.join(MODS_DIR);
-    let listing = match fs::read_dir(&dir) {
-        Ok(listing) => listing,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
-        Err(e) => return Err(e).context(format!("reading {}", dir.display())),
-    };
-    let mut jars = BTreeMap::new();
-    for item in listing {
-        let item = item.context(format!("reading {}", dir.display()))?;
-        let name = item.file_name().to_string_lossy().into_owned();
-        if !name.to_ascii_lowercase().ends_with(".jar") || !item.path().is_file() {
-            continue;
-        }
-        let hashes =
-            hash_file(&item.path()).context(format!("reading {}", item.path().display()))?;
-        jars.insert(format!("{MODS_DIR}/{name}"), hashes);
-    }
-    Ok(jars)
-}
-
 /// The config files to write, as `config/<path>` to their source: the base
 /// config, then the mode's overrides, which win on the files they share.
 fn config_files(root: &Path, mode: &str) -> Result<BTreeMap<String, PathBuf>> {
@@ -357,19 +333,11 @@ fn walk(dir: &Path, prefix: &str, files: &mut BTreeMap<String, PathBuf>) -> Resu
 /// Copies through a temporary file then a rename, so that a crash never
 /// leaves a half-written file in the instance.
 fn copy_file(source: &Path, dest: &Path) -> Result<()> {
-    let dir = dest.parent().expect("a destination is inside the instance");
-    fs::create_dir_all(dir).context(format!("creating {}", dir.display()))?;
-    let mut tmp = tempfile::Builder::new()
-        .prefix(".")
-        .suffix(".part")
-        .tempfile_in(dir)
-        .context(format!("creating a temporary file in {}", dir.display()))?;
     let mut from = fs::File::open(source).context(format!("reading {}", source.display()))?;
-    io::copy(&mut from, tmp.as_file_mut()).context(format!("writing {}", dest.display()))?;
-    tmp.persist(dest)
-        .map_err(|e| e.error)
-        .context(format!("writing {}", dest.display()))?;
-    Ok(())
+    write_atomic(dest, |file| {
+        io::copy(&mut from, file).context(format!("writing {}", dest.display()))?;
+        Ok(())
+    })
 }
 
 fn bullets(items: &[String]) -> String {

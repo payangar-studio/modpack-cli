@@ -10,9 +10,8 @@ use crate::error::{Context as _, Error, Result};
 use crate::launcher::running::{GameDetector, Processes};
 use crate::mode::{self, LoadContext};
 use crate::model::installed::Installed;
-use crate::model::instance::{InstanceState, Instances};
+use crate::model::instance::Instances;
 use crate::model::manifest::{self, Entry, Manifest};
-use crate::model::socle::SocleConfig;
 use crate::platform::Registry;
 use crate::store::download::{Failure, Http, Sources, download_all};
 use crate::store::inventory::{Inventory, inventory};
@@ -181,17 +180,8 @@ fn write_failure(out: &mut dyn Write, failure: &Failure) -> Result<()> {
 /// Reloads the mode loaded in the pack's instance, if the pack has an
 /// instance on this machine and a mode was loaded there.
 fn reload(ctx: &LoadContext<'_>, out: &mut dyn Write) -> Result<()> {
-    let name = SocleConfig::load(ctx.root)?.init.name;
-    let Some(instance) = Instances::load(ctx.instances_file)?
-        .get(&name)
-        .filter(|dir| dir.is_dir())
-        .map(Path::to_path_buf)
-    else {
-        tracing::info!(pack = %name, "no instance on this machine, nothing to reload");
-        return Ok(());
-    };
-    let Some(mode) = InstanceState::load(&instance)?.mode else {
-        tracing::info!(instance = %instance.display(), "no mode loaded yet, nothing to reload");
+    let Some(mode) = mode::loaded_mode(ctx.root, ctx.instances_file)? else {
+        tracing::info!("no instance with a loaded mode on this machine, nothing to reload");
         return Ok(());
     };
     let report = mode::load(ctx, &mode, false)?;
@@ -203,7 +193,8 @@ fn reload(ctx: &LoadContext<'_>, out: &mut dyn Write) -> Result<()> {
 mod tests {
     use super::*;
     use crate::error::ErrorKind;
-    use crate::model::socle::InitValues;
+    use crate::model::instance::InstanceState;
+    use crate::model::socle::{InitValues, SocleConfig};
     use crate::store::download::tests::{MapFetch, NoFetch, entry, manifest};
 
     /// Minecraft never runs.

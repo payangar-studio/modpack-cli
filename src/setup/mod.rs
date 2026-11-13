@@ -81,15 +81,6 @@ fn git(dir: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
-/// The pack's instance on this machine: registered in `instances_file` and
-/// still present. An instance deleted in the app counts as none.
-pub fn existing_instance(pack: &str, instances_file: &Path) -> Result<Option<PathBuf>> {
-    Ok(Instances::load(instances_file)?
-        .get(pack)
-        .filter(|dir| dir.is_dir())
-        .map(Path::to_path_buf))
-}
-
 /// What registering an instance needs from the machine.
 pub struct Machine<'a> {
     /// The machine's `instances.toml`.
@@ -205,20 +196,6 @@ mod tests {
         assert!(err.to_string().contains("not at its root"), "{err}");
     }
 
-    #[test]
-    fn missing_or_deleted_instance_counts_as_none() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("instances.toml");
-        assert_eq!(existing_instance("P", &file).unwrap(), None);
-        let instance = dir.path().join("profiles/P");
-        let mut instances = Instances::default();
-        instances.set("P", instance.clone());
-        instances.save(&file).unwrap();
-        assert_eq!(existing_instance("P", &file).unwrap(), None);
-        fs::create_dir_all(&instance).unwrap();
-        assert_eq!(existing_instance("P", &file).unwrap(), Some(instance));
-    }
-
     /// Stands for the app and the user's click: creates the instance
     /// directory named after the file as soon as it is opened.
     struct ClickingApp {
@@ -276,7 +253,7 @@ mod tests {
             "{built}"
         );
         assert_eq!(
-            existing_instance("My: Pack", &instances_file).unwrap(),
+            Instances::existing(&instances_file, "My: Pack").unwrap(),
             Some(instance)
         );
         let out = String::from_utf8(out).unwrap();

@@ -1,13 +1,11 @@
 //! What `mods/` holds, compared to the manifest.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::io;
 use std::path::Path;
 
-use super::MODS_DIR;
-use super::hash::{JarHashes, hash_file};
-use crate::error::{Context, Result};
+use super::hash::JarHashes;
+use super::{MODS_DIR, jars_in};
+use crate::error::Result;
 use crate::model::installed::Installed;
 use crate::model::manifest::Manifest;
 
@@ -63,32 +61,11 @@ pub fn inventory(root: &Path, manifest: &Manifest) -> Result<Inventory> {
     Ok(inv)
 }
 
-/// Every `.jar` file directly under `dir`, as `mods/<name>`, with its hashes.
-/// A missing directory holds none.
-pub fn jars_in(dir: &Path) -> Result<BTreeMap<String, JarHashes>> {
-    let listing = match fs::read_dir(dir) {
-        Ok(listing) => listing,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
-        Err(e) => return Err(e).context(format!("reading {}", dir.display())),
-    };
-    let mut jars = BTreeMap::new();
-    for item in listing {
-        let item = item.context(format!("reading {}", dir.display()))?;
-        let name = item.file_name().to_string_lossy().into_owned();
-        if !name.to_ascii_lowercase().ends_with(".jar") || !item.path().is_file() {
-            continue;
-        }
-        let hashes =
-            hash_file(&item.path()).context(format!("reading {}", item.path().display()))?;
-        jars.insert(format!("{MODS_DIR}/{name}"), hashes);
-    }
-    Ok(jars)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::store::download::tests::{entry, manifest};
+    use std::fs;
 
     #[test]
     fn sorts_entries_by_what_mods_holds() {

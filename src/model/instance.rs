@@ -52,6 +52,15 @@ impl Instances {
         super::write_file(path, &format!("{INSTANCES_HEADER}{}", super::to_toml(self)))
     }
 
+    /// The pack's instance on this machine: registered in `path` and still
+    /// present. An instance deleted in the app counts as none.
+    pub fn existing(path: &Path, pack: &str) -> Result<Option<PathBuf>> {
+        Ok(Self::load(path)?
+            .get(pack)
+            .filter(|dir| dir.is_dir())
+            .map(Path::to_path_buf))
+    }
+
     pub fn get(&self, pack: &str) -> Option<&Path> {
         self.instances.get(pack).map(PathBuf::as_path)
     }
@@ -219,6 +228,20 @@ mod tests {
             loaded.get("My Pack"),
             Some(dir.path().join("profiles/My Pack").as_path())
         );
+    }
+
+    #[test]
+    fn missing_or_deleted_instance_counts_as_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("instances.toml");
+        assert_eq!(Instances::existing(&file, "P").unwrap(), None);
+        let instance = dir.path().join("profiles/P");
+        let mut instances = Instances::default();
+        instances.set("P", instance.clone());
+        instances.save(&file).unwrap();
+        assert_eq!(Instances::existing(&file, "P").unwrap(), None);
+        fs::create_dir_all(&instance).unwrap();
+        assert_eq!(Instances::existing(&file, "P").unwrap(), Some(instance));
     }
 
     #[test]

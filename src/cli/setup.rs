@@ -118,7 +118,7 @@ fn instance(
     no_launch: bool,
     out: &mut dyn Write,
 ) -> Result<Option<PathBuf>> {
-    if let Some(dir) = steps::existing_instance(name, machine.instances_file)? {
+    if let Some(dir) = Instances::existing(machine.instances_file, name)? {
         writeln!(out, "instance already registered: {}", dir.display())?;
         return Ok(Some(dir));
     }

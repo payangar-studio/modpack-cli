@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
 use super::hash::copy_hashing;
-use super::jar_path;
+use super::{jar_path, write_atomic};
 use crate::error::{Context, Error, Result};
 use crate::model::installed::Installed;
 use crate::model::manifest::Entry;
@@ -198,27 +198,16 @@ pub fn download_all(
 }
 
 fn write_verified(reader: &mut dyn Read, dest: &Path, entry: &Entry) -> Result<()> {
-    let dir = dest.parent().expect("a jar path is under mods/");
-    std::fs::create_dir_all(dir).context(format!("creating {}", dir.display()))?;
-    let mut tmp = tempfile::Builder::new()
-        .prefix(".")
-        .suffix(".part")
-        .tempfile_in(dir)
-        .context(format!("creating a temporary file in {}", dir.display()))?;
-    let received = copy_hashing(reader, tmp.as_file_mut()).context("receiving the jar")?;
-    if !received.matches(&entry.hashes) {
-        return Err(Error::internal(
-            "the file received does not have the hashes of the manifest",
-            "this source serves another file; if the mod changed on purpose, regenerate the manifest with `modpack manifest`",
-        ));
-    }
-    tmp.as_file()
-        .sync_all()
-        .context(format!("writing {}", dest.display()))?;
-    tmp.persist(dest)
-        .map_err(|e| e.error)
-        .context(format!("writing {}", dest.display()))?;
-    Ok(())
+    write_atomic(dest, |file| {
+        let received = copy_hashing(reader, file).context("receiving the jar")?;
+        if !received.matches(&entry.hashes) {
+            return Err(Error::internal(
+                "the file received does not have the hashes of the manifest",
+                "this source serves another file; if the mod changed on purpose, regenerate the manifest with `modpack manifest`",
+            ));
+        }
+        Ok(())
+    })
 }
 
 #[cfg(test)]

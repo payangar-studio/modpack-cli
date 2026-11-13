@@ -6,6 +6,7 @@
 
 mod client;
 mod mrpack;
+mod page;
 #[cfg(test)]
 mod tests;
 
@@ -20,6 +21,7 @@ use super::{
 };
 use crate::error::{Error, Result};
 use crate::model::manifest::{Entry, Env, Pack, Support};
+use crate::secrets::{SecretName, Secrets};
 use client::Client;
 
 pub const NAME: &str = "modrinth";
@@ -278,8 +280,11 @@ impl Platform for Modrinth {
         mrpack::build(build)
     }
 
-    fn push_page(&self, _root: &Path) -> Result<()> {
-        Err(Error::not_implemented("page push --platform modrinth"))
+    fn push_page(&self, root: &Path) -> Result<()> {
+        let page = page::Page::load(root)?;
+        let token = Secrets::system().get(SecretName::ModrinthToken)?;
+        println!("{}", page::push(&self.client, &page, &token)?);
+        Ok(())
     }
 }
 

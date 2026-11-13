@@ -1,0 +1,37 @@
+# The project page, pushed to each platform by `modpack page push` (Modrinth)
+# or by the `modpack-curseforge-page` skill (CurseForge). The long description
+# is `description.md`, the icon `icon.png` (optional, square), the screenshots
+# `gallery/` with their titles and order in `gallery/gallery.toml`.
+
+# Name of the project; empty: the pack name given to `modpack init`.
+name = ""
+# One or two sentences, shown under the name in search results.
+summary = ""
+
+# Links shown on every platform; an empty one is left out.
+[links]
+source = ""
+issues = ""
+wiki = ""
+discord = ""
+
+[modrinth]
+# Written by `modpack page push` when it creates the project.
+project_id = ""
+# URL name at creation; empty: derived from the name.
+slug = ""
+# Featured categories (at most 3), then the others. Modrinth's list:
+# https://api.modrinth.com/v2/tag/category (project type `modpack`).
+categories = []
+additional_categories = []
+# SPDX id, required to create the project, such as `MIT` or
+# `LicenseRef-All-Rights-Reserved`.
+license = ""
+
+[curseforge]
+# Written by the `modpack-curseforge-page` skill when it creates the project.
+project_id = ""
+# Main category first, then the others, as named on CurseForge.
+categories = []
+# License as named in CurseForge's list.
+license = ""

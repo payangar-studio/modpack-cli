@@ -1,0 +1,9 @@
+# Screenshots of the page, in display order. Images of this directory not
+# listed here come after the listed ones, by file name, without title.
+# Accepted: png, jpg, jpeg, gif, webp, bmp.
+#
+# [[image]]
+# file = "spawn.png"
+# title = "The spawn"
+# description = "Where every world starts."
+# featured = true   # at most one image

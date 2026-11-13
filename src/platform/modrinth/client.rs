@@ -94,6 +94,17 @@ impl Client {
         }))
     }
 
+    /// Sends the request that `build` makes from the agent and the base URL
+    /// of the API, for calls the helpers above do not cover (authenticated
+    /// writes). Any status comes back as a response; 429 is retried.
+    pub fn call(
+        &self,
+        what: &str,
+        build: impl Fn(&Agent, &str) -> Result<Response<Body>, ureq::Error>,
+    ) -> Result<Response<Body>> {
+        self.send(what, || build(&self.agent, &self.api))
+    }
+
     /// Sends the request built by `call`, again after a wait while Modrinth
     /// answers 429.
     fn send(

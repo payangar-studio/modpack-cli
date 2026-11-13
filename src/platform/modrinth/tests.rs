@@ -455,9 +455,10 @@ fn eligibility_follows_the_download_hosts() {
 }
 
 #[test]
-fn push_page_is_declared_but_not_implemented_yet() {
-    let err = Modrinth::default().push_page(Path::new(".")).unwrap_err();
-    assert!(err.to_string().contains("not implemented yet"));
+fn push_page_without_a_page_says_where_it_is_expected() {
+    let dir = tempfile::tempdir().unwrap();
+    let err = Modrinth::default().push_page(dir.path()).unwrap_err();
+    assert!(err.to_string().contains("cannot read page/page.toml"));
 }
 
 #[test]

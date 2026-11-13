@@ -23,7 +23,9 @@ toml = "1.2.1"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 keyring-core = "1.0.1"
-ureq = "3.5.2"
+serde_json = "1.0.154"
+ureq = { version = "3.5.2", features = ["json"] }
+zip = { version = "9.5.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus-secret-service-keyring-store = { version = "1.0.1", features = ["crypto-rust"] }
@@ -35,3 +37,5 @@ windows-native-keyring-store = "1.1.0"
 assert_cmd = "2.2.2"
 predicates = "3.1.4"
 tempfile = "3.27.0"
+tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
+wiremock = "0.6.5"

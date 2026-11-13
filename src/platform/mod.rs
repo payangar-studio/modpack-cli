@@ -17,6 +17,7 @@ use crate::model::manifest::{Entry, Pack};
 
 #[cfg(test)]
 pub mod fake;
+pub mod modrinth;
 
 /// The operations of the contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -230,7 +231,7 @@ impl Registry {
 
     /// The platforms built into the CLI, in the order they are tried.
     pub fn builtin() -> Self {
-        Self::new(Vec::new())
+        Self::new(vec![Box::new(modrinth::Modrinth::default())])
     }
 
     pub fn all(&self) -> impl Iterator<Item = &dyn Platform> {

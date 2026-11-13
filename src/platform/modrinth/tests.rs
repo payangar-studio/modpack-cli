@@ -331,11 +331,18 @@ fn download_streams_and_checks_the_sha512() {
     let api = Api::start();
     api.mount(
         Mock::given(method("GET"))
+            .and(path("/version/Pb3OXVqC"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(version_json(&api, "Pb3OXVqC", "0.6.0", "release")),
+            ),
+    );
+    api.mount(
+        Mock::given(method("GET"))
             .and(path("/data/AANobbMI/versions/v2/sodium.jar"))
             .respond_with(ResponseTemplate::new(200).set_body_bytes(JAR)),
     );
     let mut entry = entry(section("AANobbMI", "Pb3OXVqC"));
-    entry.downloads = vec![api.file_url()];
     entry.hashes.sha512 = sha512(JAR);
 
     let platform = api.platform();
@@ -346,16 +353,14 @@ fn download_streams_and_checks_the_sha512() {
     stream.read_to_end(&mut bytes).unwrap();
     assert_eq!(bytes, JAR);
 
+    // A version whose file has other hashes is not the entry's jar.
     entry.hashes.sha512 = sha512(b"another jar");
-    let Download::Stream(mut stream) = platform.download(&entry).unwrap() else {
-        panic!("Modrinth streams its downloads");
-    };
-    let err = stream.read_to_end(&mut Vec::new()).unwrap_err();
-    assert!(err.to_string().contains("sha512 mismatch"));
+    let err = platform.download(&entry).unwrap_err();
+    assert!(err.to_string().contains("is not on Modrinth"), "{err}");
 }
 
 #[test]
-fn download_without_url_asks_the_version() {
+fn download_asks_the_version_for_a_fresh_url() {
     let api = Api::start();
     api.mount(
         Mock::given(method("GET"))
@@ -371,6 +376,8 @@ fn download_without_url_asks_the_version() {
             .respond_with(ResponseTemplate::new(200).set_body_bytes(JAR)),
     );
     let mut entry = entry(section("AANobbMI", "Pb3OXVqC"));
+    // The stored URL is gone; the version gives the current one.
+    entry.downloads = vec![format!("{}/gone.jar", api.server.uri())];
     entry.hashes.sha512 = sha512(JAR);
     let Download::Stream(mut stream) = api.platform().download(&entry).unwrap() else {
         panic!("Modrinth streams its downloads");

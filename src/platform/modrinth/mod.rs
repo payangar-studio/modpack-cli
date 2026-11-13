@@ -246,18 +246,15 @@ impl Platform for Modrinth {
                 "regenerate the manifest with `modpack manifest`",
             ));
         }
-        let url = match entry.downloads.first() {
-            Some(url) => url.clone(),
-            None => {
-                let version = self.version_of(entry)?;
-                version
-                    .files
-                    .iter()
-                    .find(|f| f.hashes.sha512.eq_ignore_ascii_case(&entry.hashes.sha512))
-                    .map(|f| f.url.clone())
-                    .ok_or_else(|| not_on_modrinth(entry))?
-            }
-        };
+        // The entry's `downloads` were already tried before the platforms:
+        // ask the version for its current URL rather than the stored one.
+        let url = self
+            .version_of(entry)?
+            .files
+            .iter()
+            .find(|f| f.hashes.sha512.eq_ignore_ascii_case(&entry.hashes.sha512))
+            .map(|f| f.url.clone())
+            .ok_or_else(|| not_on_modrinth(entry))?;
         Ok(Download::Stream(
             self.client.download(&url, &entry.hashes.sha512)?,
         ))

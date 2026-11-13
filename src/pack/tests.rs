@@ -394,6 +394,12 @@ fn report_serializes_for_machines() {
                 reason: "why".into(),
             }],
         }],
+        local: vec![LocalMod {
+            key: "custom".into(),
+            path: "mods-local/custom.jar".into(),
+            approved: false,
+        }],
+        warnings: vec!["check it".into()],
     };
     assert_eq!(
         serde_json::to_value(&report).unwrap(),
@@ -404,7 +410,9 @@ fn report_serializes_for_machines() {
             ],
             "blocked": [
                 { "mode": "default", "platform": "curseforge", "mods": [{ "key": "iris", "reason": "why" }] }
-            ]
+            ],
+            "local": [{ "key": "custom", "path": "mods-local/custom.jar", "approved": false }],
+            "warnings": ["check it"]
         })
     );
     assert!(
@@ -415,4 +423,105 @@ fn report_serializes_for_machines() {
         .blocked_error()
         .is_none()
     );
+}
+
+/// Adds the local mod `custom` to the repository: its jar in `mods-local/`
+/// and its entry, approved when `approved`.
+fn add_local(root: &Path, approved: bool) {
+    let jar = root.join("mods-local/custom-1.0.jar");
+    fs::create_dir_all(jar.parent().unwrap()).unwrap();
+    fs::write(&jar, "custom jar").unwrap();
+    let hashes = hash_file(&jar).unwrap();
+    let path = root.join(manifest::FILE_NAME);
+    let mut manifest = Manifest::load(&path).unwrap();
+    manifest.upsert(Entry {
+        key: "custom".into(),
+        path: "mods-local/custom-1.0.jar".into(),
+        file_size: hashes.size,
+        downloads: Vec::new(),
+        url: None,
+        source: Some(crate::model::manifest::Source::Local),
+        approved: approved.then(|| hashes.sha512.clone()),
+        hashes: crate::model::manifest::Hashes {
+            sha1: hashes.sha1,
+            sha512: hashes.sha512,
+        },
+        env: Default::default(),
+        platforms: Default::default(),
+    });
+    manifest.save(&path).unwrap();
+}
+
+#[test]
+fn a_local_mod_is_embedded_in_every_pack_with_a_warning() {
+    let repo = repo(everywhere);
+    add_local(repo.path(), false);
+    let out = repo.path().join("dist");
+    let report = build(
+        repo.path(),
+        &registry(),
+        &Request {
+            mode: Some("server"),
+            ..request(&out)
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        report.artifacts.len(),
+        2,
+        "never blocked: {:?}",
+        report.blocked
+    );
+    for artifact in &report.artifacts {
+        let files = unzip(&artifact.path);
+        assert_eq!(overrides(&files)["mods/custom-1.0.jar"], "custom jar");
+    }
+    let mrpack = unzip(&out.join("fixture-pack-server-1.2.3.mrpack"));
+    let index: Value = serde_json::from_str(&mrpack["modrinth.index.json"]).unwrap();
+    assert_eq!(
+        index["files"].as_array().unwrap().len(),
+        1,
+        "not a download"
+    );
+    let cf = unzip(&out.join("fixture-pack-server-1.2.3.zip"));
+    let manifest: Value = serde_json::from_str(&cf["manifest.json"]).unwrap();
+    assert_eq!(manifest["files"].as_array().unwrap().len(), 1);
+
+    assert_eq!(
+        report.local,
+        [LocalMod {
+            key: "custom".into(),
+            path: "mods-local/custom-1.0.jar".into(),
+            approved: false
+        }]
+    );
+    assert_eq!(report.warnings.len(), 2, "{:?}", report.warnings);
+    assert!(report.warnings[0].contains("modpack approve custom"));
+    assert!(report.warnings[1].starts_with("curseforge (custom): "));
+    assert!(report.warnings[1].contains("approved list of third-party mods"));
+
+    // Approved, it is still reported.
+    add_local(repo.path(), true);
+    let report = build(repo.path(), &registry(), &request(&out)).unwrap();
+    assert!(report.local[0].approved);
+    assert!(
+        report.warnings[0].ends_with("approved"),
+        "{:?}",
+        report.warnings
+    );
+}
+
+#[test]
+fn a_local_jar_changed_since_the_manifest_is_never_packed() {
+    let repo = repo(everywhere);
+    add_local(repo.path(), true);
+    fs::write(repo.path().join("mods-local/custom-1.0.jar"), "edited").unwrap();
+    let out = repo.path().join("dist");
+    let err = build(repo.path(), &registry(), &request(&out)).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Usage);
+    assert!(err.hint().contains("modpack manifest"), "{}", err.hint());
+
+    fs::remove_file(repo.path().join("mods-local/custom-1.0.jar")).unwrap();
+    let err = build(repo.path(), &registry(), &request(&out)).unwrap_err();
+    assert!(err.to_string().contains("is missing"), "{err}");
 }

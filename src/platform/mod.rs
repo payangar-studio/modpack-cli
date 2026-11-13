@@ -214,6 +214,12 @@ pub trait Platform: Send + Sync {
         Err(unsupported(self.name(), Operation::PackEligibility))
     }
 
+    /// What to check by hand about a jar embedded in this platform's pack
+    /// (a local mod, under `overrides/mods/`), if anything.
+    fn embedded_jar_note(&self) -> Option<String> {
+        None
+    }
+
     /// Builds the pack artifact and returns its path.
     fn build_pack(&self, build: &PackBuild<'_>) -> Result<PathBuf> {
         let _ = build;

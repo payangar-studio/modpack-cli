@@ -369,6 +369,10 @@ impl Platform for CurseForge {
         Ok(Eligibility::Blocked { reason })
     }
 
+    fn embedded_jar_note(&self) -> Option<String> {
+        Some("a CurseForge pack accepts an embedded jar only if it is on CurseForge's approved list of third-party mods, which has no API; check it by hand".to_owned())
+    }
+
     fn build_pack(&self, build: &PackBuild<'_>) -> Result<PathBuf> {
         pack::build(build)
     }

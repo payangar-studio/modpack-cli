@@ -2,8 +2,8 @@
 //! manifest, rebuilds
 //! the entries whose jar changed and links entries to the platforms that did
 //! not know them yet. A missing jar keeps its entry.
-//! Then checks `modes.toml` against the manifest, so that the `pre-commit`
-//! hook, which runs this command, stops a commit whose modes are broken.
+//! Then checks `variants.toml` against the manifest, so that the `pre-commit`
+//! hook, which runs this command, stops a commit whose variants are broken.
 
 use std::io::Write;
 use std::path::Path;
@@ -11,13 +11,13 @@ use std::path::Path;
 use crate::context::Context;
 use crate::error::{Error, Result};
 use crate::model::manifest::{FILE_NAME, Manifest};
-use crate::model::modes::{self, Modes};
+use crate::model::variants::{self, Variants};
 use crate::ops::manifest::{check, regenerate};
 use crate::platform::Registry;
 
 #[derive(Debug, clap::Args)]
 #[command(
-    after_help = "A jar missing from mods/ means \"not installed here\": its entry is kept, with a warning. `modpack install` downloads it; `modpack remove <key>` takes the mod out of the pack and its modes."
+    after_help = "A jar missing from mods/ means \"not installed here\": its entry is kept, with a warning. `modpack install` downloads it; `modpack remove <key>` takes the mod out of the pack and its variants."
 )]
 pub struct Args {
     /// Fail if the manifest is out of date instead of rewriting it
@@ -28,17 +28,17 @@ pub struct Args {
 pub fn run(args: Args, ctx: &Context) -> Result<()> {
     let root = ctx.require_root()?;
     update_or_check(args, root)?;
-    check_modes(root)
+    check_variants(root)
 }
 
-/// `modes.toml` parses and names only keys of the manifest. A repository
-/// without `modes.toml` has nothing to check.
-fn check_modes(root: &Path) -> Result<()> {
-    let path = root.join(modes::FILE_NAME);
+/// `variants.toml` parses and names only keys of the manifest. A repository
+/// without `variants.toml` has nothing to check.
+fn check_variants(root: &Path) -> Result<()> {
+    let path = root.join(variants::FILE_NAME);
     if !path.is_file() {
         return Ok(());
     }
-    Modes::load(&path)?.check(&Manifest::load(&root.join(FILE_NAME))?)
+    Variants::load(&path)?.check(&Manifest::load(&root.join(FILE_NAME))?)
 }
 
 fn update_or_check(args: Args, root: &Path) -> Result<()> {

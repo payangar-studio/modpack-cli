@@ -1,10 +1,10 @@
-//! Loading a mode into the pack's Modrinth instance.
+//! Loading a variant into the pack's Modrinth instance.
 //!
-//! The repository feeds the instance one way. Loading a mode, in this order:
+//! The repository feeds the instance one way. Loading a variant, in this order:
 //! finds the pack's instance, refuses while Minecraft runs from it, stops on
-//! drift unless forced, resolves the mode, then puts the mode's jars in the
-//! instance's `mods/`, writes the base config and the mode's overrides into
-//! its `config/`, removes the config files it wrote that the mode does not
+//! drift unless forced, resolves the variant, then puts the variant's jars in the
+//! instance's `mods/`, writes the base config and the variant's overrides into
+//! its `config/`, removes the config files it wrote that the variant does not
 //! have, and records what it wrote in `.modpack-state.toml`.
 //!
 //! A jar of the instance is identified by its hashes. Only jars the manifest
@@ -21,9 +21,9 @@ use crate::error::{Context, Error, Result};
 use crate::launcher::running::GameDetector;
 use crate::model::instance::{self, DISABLED_SUFFIX, InstanceState, Instances, disabled_in_app};
 use crate::model::manifest::{self, Entry, Manifest};
-use crate::model::modes::{self, Modes};
 use crate::model::sha256_file;
 use crate::model::socle::SocleConfig;
+use crate::model::variants::{self, Variants};
 use crate::ops::local::restore_hint;
 use crate::store::download::{Sources, download_all};
 use crate::store::inventory::inventory;
@@ -31,12 +31,12 @@ use crate::store::{MODS_DIR, jar_path, jars_in, write_atomic};
 
 /// Base config, in the repository and in the instance.
 pub const CONFIG_DIR: &str = "config";
-/// `overrides/<mode>/config/`: the config files a mode overrides.
+/// `overrides/<variant>/config/`: the config files a variant overrides.
 pub const OVERRIDES_DIR: &str = "overrides";
 /// Placeholder that keeps an empty directory in git; never copied.
 const GITKEEP: &str = ".gitkeep";
 
-/// What loading a mode needs from the machine. Commands build it from the
+/// What loading a variant needs from the machine. Commands build it from the
 /// real machine; tests pass temporary directories and fakes.
 #[derive(Clone, Copy)]
 pub struct LoadContext<'a> {
@@ -53,37 +53,37 @@ pub struct LoadContext<'a> {
 /// What a load did. Paths are relative to the instance, with `/` separators.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LoadReport {
-    pub mode: String,
+    pub variant: String,
     pub instance: PathBuf,
-    /// Keys of the mode's mods downloaded into the repository's `mods/`.
+    /// Keys of the variant's mods downloaded into the repository's `mods/`.
     pub downloaded: Vec<String>,
     /// Jars copied into the instance.
     pub copied: Vec<String>,
-    /// Jars of the manifest outside the mode, removed from the instance.
+    /// Jars of the manifest outside the variant, removed from the instance.
     pub removed: Vec<String>,
     /// Jars unknown to the manifest, left as they are.
     pub unknown: Vec<String>,
     /// Config files written into the instance: new, or with other content.
     pub written: Vec<String>,
-    /// Config files the CLI wrote for another mode, removed from the instance.
+    /// Config files the CLI wrote for another variant, removed from the instance.
     pub config_removed: Vec<String>,
     /// Files changed in the instance that `--force` overwrote or let go.
     pub forced: Vec<String>,
 }
 
-/// Loads `mode` into the pack's instance. `force` goes past files of the
+/// Loads `variant` into the pack's instance. `force` goes past files of the
 /// instance changed since the CLI wrote them, and past foreign jars sitting
-/// where a jar of the mode goes.
-pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport> {
+/// where a jar of the variant goes.
+pub fn load(ctx: &LoadContext<'_>, variant: &str, force: bool) -> Result<LoadReport> {
     let root = ctx.root;
-    // The mode first: an unknown mode is reported before a missing instance.
+    // The variant first: an unknown variant is reported before a missing instance.
     let manifest = load_manifest(root)?;
-    let resolved = load_modes(root)?.resolve(mode, &manifest)?;
+    let resolved = load_variants(root)?.resolve(variant, &manifest)?;
     let instance = find_instance(root, ctx.instances_file)?;
     if ctx.game.is_running(&instance)? {
         return Err(Error::blocked(
             format!("Minecraft is running from {}", instance.display()),
-            "quit Minecraft, then load the mode again",
+            "quit Minecraft, then load the variant again",
         ));
     }
 
@@ -121,11 +121,11 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
         .iter()
         .filter_map(|k| manifest.get(k))
         .collect();
-    let in_mode: BTreeSet<&str> = resolved.keys.iter().map(String::as_str).collect();
+    let in_variant: BTreeSet<&str> = resolved.keys.iter().map(String::as_str).collect();
 
-    // Sort the instance's jars: the mode's, other known ones, unknown ones.
+    // Sort the instance's jars: the variant's, other known ones, unknown ones.
     let mut new_state = InstanceState {
-        mode: Some(mode.to_owned()),
+        variant: Some(variant.to_owned()),
         files: BTreeMap::new(),
     };
     let mut present = BTreeSet::new();
@@ -133,7 +133,7 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
     let mut unknown = Vec::new();
     for (rel, hashes) in jars_in(&instance.join(MODS_DIR))? {
         match manifest.mods.iter().find(|e| hashes.matches(&e.hashes)) {
-            Some(e) if in_mode.contains(e.key.as_str()) => {
+            Some(e) if in_variant.contains(e.key.as_str()) => {
                 present.insert(e.key.as_str());
                 new_state.files.insert(rel, hashes.sha256);
             }
@@ -149,7 +149,7 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
         to_copy.push((jar_path(root, entry)?, entry.instance_path()));
     }
 
-    // A foreign file where a jar of the mode goes is never overwritten silently.
+    // A foreign file where a jar of the variant goes is never overwritten silently.
     let in_the_way: Vec<String> = to_copy
         .iter()
         .map(|(_, rel)| rel.clone())
@@ -158,7 +158,7 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
     if !in_the_way.is_empty() && !force {
         return Err(Error::blocked(
             format!(
-                "{} jar(s) of the instance unknown to the manifest sit where a jar of the mode goes:{}",
+                "{} jar(s) of the instance unknown to the manifest sit where a jar of the variant goes:{}",
                 in_the_way.len(),
                 bullets(&in_the_way)
             ),
@@ -168,8 +168,8 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
     unknown.retain(|rel| !in_the_way.contains(rel));
 
     // Nor is a config file of the instance the CLI never wrote, such as one
-    // the game created, when the mode has other content for it.
-    let configs = config_files(root, mode)?;
+    // the game created, when the variant has other content for it.
+    let configs = config_files(root, variant)?;
     let mut foreign = Vec::new();
     for (rel, source) in &configs {
         let dest = instance.join(rel);
@@ -180,7 +180,7 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
     if !foreign.is_empty() && !force {
         return Err(Error::blocked(
             format!(
-                "{} config file(s) of the instance that modpack-cli did not write differ from the mode's:{}",
+                "{} config file(s) of the instance that modpack-cli did not write differ from the variant's:{}",
                 foreign.len(),
                 bullets(&foreign)
             ),
@@ -191,7 +191,7 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
     let downloaded = fill_stock(root, &manifest, &wanted, ctx.sources)?;
 
     let mut report = LoadReport {
-        mode: mode.to_owned(),
+        variant: variant.to_owned(),
         instance: instance.clone(),
         downloaded,
         unknown,
@@ -216,7 +216,7 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
         report.copied.push(rel);
     }
     // Forced past a jar the app disabled: the repository wins, so the jar is
-    // back (when the mode has it) and its disabled copy goes.
+    // back (when the variant has it) and its disabled copy goes.
     for rel in disabled {
         let path = instance.join(format!("{rel}{DISABLED_SUFFIX}"));
         fs::remove_file(&path).context(format!("removing {}", path.display()))?;
@@ -230,8 +230,8 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
         }
         new_state.record(&instance, rel)?;
     }
-    // A config file the CLI wrote that this mode does not have, such as the
-    // previous mode's override, goes. Changed since, it is drift: past the
+    // A config file the CLI wrote that this variant does not have, such as the
+    // previous variant's override, goes. Changed since, it is drift: past the
     // check above only with --force, which lets the repository win.
     let config_prefix = format!("{CONFIG_DIR}/");
     for rel in state.files.keys() {
@@ -250,29 +250,29 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
     Ok(report)
 }
 
-/// The mode loaded in the pack's instance on this machine, if the pack has an
-/// instance here and a mode was loaded into it.
-pub fn loaded_mode(root: &Path, instances_file: &Path) -> Result<Option<String>> {
+/// The variant loaded in the pack's instance on this machine, if the pack has an
+/// instance here and a variant was loaded into it.
+pub fn loaded_variant(root: &Path, instances_file: &Path) -> Result<Option<String>> {
     let name = SocleConfig::load(root)?.init.name;
     match Instances::existing(instances_file, &name)? {
-        Some(dir) => Ok(InstanceState::load(&dir)?.mode),
+        Some(dir) => Ok(InstanceState::load(&dir)?.variant),
         None => Ok(None),
     }
 }
 
-/// Reads `modes.toml` at the repository root.
-pub fn load_modes(root: &Path) -> Result<Modes> {
-    let path = root.join(modes::FILE_NAME);
+/// Reads `variants.toml` at the repository root.
+pub fn load_variants(root: &Path) -> Result<Variants> {
+    let path = root.join(variants::FILE_NAME);
     if !path.is_file() {
         return Err(Error::usage(
-            format!("no {} in this repository", modes::FILE_NAME),
+            format!("no {} in this repository", variants::FILE_NAME),
             format!(
                 "create {} at the repository root, with at least a [default] table",
-                modes::FILE_NAME
+                variants::FILE_NAME
             ),
         ));
     }
-    Modes::load(&path)
+    Variants::load(&path)
 }
 
 fn load_manifest(root: &Path) -> Result<Manifest> {
@@ -296,7 +296,7 @@ fn find_instance(root: &Path, instances_file: &Path) -> Result<PathBuf> {
     })
 }
 
-/// Makes sure the repository holds every jar of the mode, with the
+/// Makes sure the repository holds every jar of the variant, with the
 /// manifest's hashes, downloading the missing ones into `mods/`. Returns their
 /// keys. A local mod's jar is never downloaded: git holds it.
 fn fill_stock(
@@ -323,7 +323,7 @@ fn fill_stock(
         let entries: Vec<&Entry> = local_gaps.iter().map(|(e, _)| *e).collect();
         return Err(Error::blocked(
             format!(
-                "local jar(s) of the mode missing from mods-local/ or changed since the manifest:{}",
+                "local jar(s) of the variant missing from mods-local/ or changed since the manifest:{}",
                 bullets(&lines)
             ),
             format!(
@@ -332,23 +332,23 @@ fn fill_stock(
             ),
         ));
     }
-    let in_mode = |keys: &[String]| -> Vec<String> {
+    let in_variant = |keys: &[String]| -> Vec<String> {
         keys.iter()
             .filter(|k| !local(k) && wanted.iter().any(|e| &e.key == *k))
             .cloned()
             .collect()
     };
-    let mismatched = in_mode(&inv.mismatched);
+    let mismatched = in_variant(&inv.mismatched);
     if !mismatched.is_empty() {
         return Err(Error::blocked(
             format!(
-                "jar(s) of the mode in the repository's mods/ differ from the manifest: {}",
+                "jar(s) of the variant in the repository's mods/ differ from the manifest: {}",
                 mismatched.join(", ")
             ),
             "restore them with `modpack install --force`, or run `modpack manifest` if you changed them on purpose",
         ));
     }
-    let missing = in_mode(&inv.missing);
+    let missing = in_variant(&inv.missing);
     let entries: Vec<&Entry> = missing.iter().filter_map(|k| manifest.get(k)).collect();
     let failed: Vec<String> = download_all(root, &entries, sources)?
         .into_iter()
@@ -357,7 +357,7 @@ fn fill_stock(
     if !failed.is_empty() {
         return Err(Error::internal(
             format!(
-                "{} jar(s) of the mode could not be downloaded: {}",
+                "{} jar(s) of the variant could not be downloaded: {}",
                 failed.len(),
                 failed.join(", ")
             ),
@@ -368,11 +368,11 @@ fn fill_stock(
 }
 
 /// The config files to write, as `config/<path>` to their source: the base
-/// config, then the mode's overrides, which win on the files they share.
-fn config_files(root: &Path, mode: &str) -> Result<BTreeMap<String, PathBuf>> {
+/// config, then the variant's overrides, which win on the files they share.
+fn config_files(root: &Path, variant: &str) -> Result<BTreeMap<String, PathBuf>> {
     let mut files = BTreeMap::new();
     walk(&root.join(CONFIG_DIR), CONFIG_DIR, &mut files)?;
-    let overrides = root.join(OVERRIDES_DIR).join(mode).join(CONFIG_DIR);
+    let overrides = root.join(OVERRIDES_DIR).join(variant).join(CONFIG_DIR);
     walk(&overrides, CONFIG_DIR, &mut files)?;
     Ok(files)
 }
@@ -424,13 +424,13 @@ fn bullets(items: &[String]) -> String {
     items.iter().map(|i| format!("\n  - {i}")).collect()
 }
 
-/// The report as shown after `modpack mode load` and `modpack install`.
+/// The report as shown after `modpack variant load` and `modpack install`.
 impl fmt::Display for LoadReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(
             f,
-            "mode `{}` loaded into {}",
-            self.mode,
+            "variant `{}` loaded into {}",
+            self.variant,
             self.instance.display()
         )?;
         let lines = [

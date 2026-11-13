@@ -1,4 +1,4 @@
-//! `modpack remove`: removes a mod from the repository and its modes.
+//! `modpack remove`: removes a mod from the repository and its variants.
 
 use crate::context::Context;
 use crate::error::Result;

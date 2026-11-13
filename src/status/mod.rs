@@ -1,5 +1,5 @@
 //! The state of a pack on this machine, as `modpack status` reports it: socle
-//! version, the pack's instance, the mode loaded there, drift, jars unknown to
+//! version, the pack's instance, the variant loaded there, drift, jars unknown to
 //! the manifest, how `mods/` of the repository compares to the manifest, and
 //! the local mods with their approval.
 //!
@@ -54,8 +54,8 @@ pub enum Gap {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Instance {
     pub path: String,
-    /// Mode loaded last; `None` before the first load.
-    pub mode: Option<String>,
+    /// Variant loaded last; `None` before the first load.
+    pub variant: Option<String>,
     /// Files the CLI wrote, changed or gone since, relative to the instance.
     pub drift: Vec<String>,
     /// Jars of `drift` the Modrinth App disabled (renamed `<jar>.disabled`).
@@ -160,7 +160,7 @@ fn instance(dir: &Path, manifest: &Manifest) -> Result<Instance> {
     }
     Ok(Instance {
         path: dir.to_string_lossy().into_owned(),
-        mode: state.mode,
+        variant: state.variant,
         drift,
         disabled,
         unknown_jars,
@@ -187,9 +187,12 @@ impl Status {
             )?,
             Some(i) => {
                 writeln!(out, "instance: {}", i.path)?;
-                match &i.mode {
-                    Some(mode) => writeln!(out, "mode: {mode}")?,
-                    None => writeln!(out, "mode: none loaded; run `modpack mode load <mode>`")?,
+                match &i.variant {
+                    Some(variant) => writeln!(out, "variant: {variant}")?,
+                    None => writeln!(
+                        out,
+                        "variant: none loaded; run `modpack variant load <variant>`"
+                    )?,
                 }
                 let drift: Vec<String> = i
                     .drift
@@ -303,7 +306,7 @@ mod tests {
     const PACK: &str = "Test Pack";
 
     /// A repository whose manifest lists `jei` and `iris`, both in `mods/`;
-    /// an instance where the CLI loaded the `default` mode with both jars and
+    /// an instance where the CLI loaded the `default` variant with both jars and
     /// one config file; and the instances file that links them.
     struct Setup {
         repo: tempfile::TempDir,
@@ -338,7 +341,7 @@ mod tests {
             }
             setup.write_instance("config/jei.toml", b"a = 1");
             let mut state = InstanceState {
-                mode: Some("default".into()),
+                variant: Some("default".into()),
                 ..Default::default()
             };
             for file in [
@@ -411,14 +414,14 @@ mod tests {
         assert_eq!(status.socle.gap, Gap::Equal);
         let instance = status.instance.as_ref().unwrap();
         assert_eq!(instance.path, setup.instance().to_string_lossy());
-        assert_eq!(instance.mode.as_deref(), Some("default"));
+        assert_eq!(instance.variant.as_deref(), Some("default"));
         assert!(instance.drift.is_empty());
         assert!(instance.unknown_jars.is_empty());
         assert!(status.missing_jars.is_empty());
         assert!(!status.manifest.stale);
 
         let out = text(&status);
-        assert!(out.contains("mode: default"), "{out}");
+        assert!(out.contains("variant: default"), "{out}");
         assert!(out.contains("manifest: up to date"), "{out}");
         assert!(!out.contains("drift"), "{out}");
     }
@@ -593,14 +596,14 @@ mod tests {
     }
 
     #[test]
-    fn instance_without_a_loaded_mode() {
+    fn instance_without_a_loaded_variant() {
         let setup = Setup::new();
         fs::remove_file(setup.instance().join(crate::model::instance::STATE_FILE)).unwrap();
         let status = setup.status();
         let instance = status.instance.as_ref().unwrap();
-        assert_eq!(instance.mode, None);
+        assert_eq!(instance.variant, None);
         assert!(instance.drift.is_empty());
-        assert!(text(&status).contains("mode: none loaded"));
+        assert!(text(&status).contains("variant: none loaded"));
     }
 
     #[test]

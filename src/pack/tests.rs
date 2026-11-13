@@ -32,7 +32,7 @@ fn table(pairs: &[(&str, toml::Value)]) -> toml::Table {
 }
 
 /// A repository made of the fixture, its manifest changed by `edit`, with
-/// base config and overrides for the `server` mode.
+/// base config and overrides for the `server` variant.
 fn repo(edit: impl FnOnce(&mut Manifest)) -> TempDir {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
@@ -43,8 +43,8 @@ fn repo(edit: impl FnOnce(&mut Manifest)) -> TempDir {
     )
     .unwrap();
     fs::copy(
-        fixtures().join(modes::FILE_NAME),
-        root.join(modes::FILE_NAME),
+        fixtures().join(variants::FILE_NAME),
+        root.join(variants::FILE_NAME),
     )
     .unwrap();
     let mut manifest = Manifest::load(&fixtures().join(manifest::FILE_NAME)).unwrap();
@@ -85,7 +85,7 @@ fn everywhere(manifest: &mut Manifest) {
 
 fn request<'a>(out: &'a Path) -> Request<'a> {
     Request {
-        mode: None,
+        variant: None,
         platform: None,
         out_dir: out,
         version: "1.2.3",
@@ -116,7 +116,7 @@ fn overrides(files: &BTreeMap<String, String>) -> BTreeMap<&str, &str> {
 }
 
 #[test]
-fn builds_one_artifact_per_mode_and_platform() {
+fn builds_one_artifact_per_variant_and_platform() {
     let repo = repo(everywhere);
     let out = repo.path().join("dist");
     let report = build(repo.path(), &registry(), &request(&out)).unwrap();
@@ -126,14 +126,14 @@ fn builds_one_artifact_per_mode_and_platform() {
     let built: Vec<(&str, &str, PathBuf)> = report
         .artifacts
         .iter()
-        .map(|a| (a.mode.as_str(), a.platform.as_str(), a.path.clone()))
+        .map(|a| (a.variant.as_str(), a.platform.as_str(), a.path.clone()))
         .collect();
     let expected: Vec<(&str, &str, PathBuf)> = ["default", "hardcore", "server"]
         .into_iter()
-        .flat_map(|mode| {
+        .flat_map(|variant| {
             [("modrinth", "mrpack"), ("curseforge", "zip")].map(|(platform, ext)| {
-                let file = format!("fixture-pack-{mode}-1.2.3.{ext}");
-                (mode, platform, out.join(file))
+                let file = format!("fixture-pack-{variant}-1.2.3.{ext}");
+                (variant, platform, out.join(file))
             })
         })
         .collect();
@@ -144,13 +144,13 @@ fn builds_one_artifact_per_mode_and_platform() {
 }
 
 #[test]
-fn artifacts_hold_the_mode_mods_and_merged_overrides() {
+fn artifacts_hold_the_variant_mods_and_merged_overrides() {
     let repo = repo(everywhere);
     let out = repo.path().join("dist");
     build(repo.path(), &registry(), &request(&out)).unwrap();
 
-    // The server mode removes sodium, iris and jei, and hardcore-tweaks is
-    // removed from the default mode.
+    // The server variant removes sodium, iris and jei, and hardcore-tweaks is
+    // removed from the default variant.
     let mrpack = unzip(&out.join("fixture-pack-server-1.2.3.mrpack"));
     let index: Value = serde_json::from_str(&mrpack["modrinth.index.json"]).unwrap();
     assert_eq!(index["name"], "Fixture Pack");
@@ -180,7 +180,7 @@ fn artifacts_hold_the_mode_mods_and_merged_overrides() {
     );
     assert_eq!(overrides(&cf), server_overrides);
 
-    // A mode without overrides gets the base config only, and its own mods.
+    // A variant without overrides gets the base config only, and its own mods.
     let cf = unzip(&out.join("fixture-pack-hardcore-1.2.3.zip"));
     let manifest: Value = serde_json::from_str(&cf["manifest.json"]).unwrap();
     assert_eq!(manifest["files"].as_array().unwrap().len(), 5);
@@ -208,7 +208,7 @@ fn an_ineligible_mod_blocks_its_platform_only() {
     let built: Vec<(&str, &str)> = report
         .artifacts
         .iter()
-        .map(|a| (a.mode.as_str(), a.platform.as_str()))
+        .map(|a| (a.variant.as_str(), a.platform.as_str()))
         .collect();
     assert_eq!(
         built,
@@ -223,7 +223,7 @@ fn an_ineligible_mod_blocks_its_platform_only() {
         .iter()
         .map(|b| {
             let keys = b.mods.iter().map(|m| m.key.as_str()).collect();
-            (b.mode.as_str(), b.platform.as_str(), keys)
+            (b.variant.as_str(), b.platform.as_str(), keys)
         })
         .collect();
     assert_eq!(
@@ -249,7 +249,7 @@ fn an_ineligible_mod_blocks_its_platform_only() {
     let err = report.blocked_error().unwrap();
     assert_eq!(err.kind(), ErrorKind::Blocked);
     let text = err.to_string();
-    assert!(text.contains("curseforge pack of mode `default`:"));
+    assert!(text.contains("curseforge pack of variant `default`:"));
     assert!(text.contains("`iris`: not hosted on CurseForge"));
     assert!(err.hint().contains("--platform"));
 }
@@ -269,7 +269,7 @@ fn a_mod_hosted_elsewhere_is_packed_where_its_platform_accepts_it() {
         repo.path(),
         &registry(),
         &Request {
-            mode: Some("hardcore"),
+            variant: Some("hardcore"),
             ..request(&out)
         },
     )
@@ -287,7 +287,7 @@ fn a_mod_hosted_elsewhere_is_packed_where_its_platform_accepts_it() {
     assert_eq!(report.blocked.len(), 1);
     let blocked = &report.blocked[0];
     assert_eq!(
-        (blocked.mode.as_str(), blocked.platform.as_str()),
+        (blocked.variant.as_str(), blocked.platform.as_str()),
         ("hardcore", "curseforge")
     );
     assert_eq!(blocked.mods.len(), 1);
@@ -300,14 +300,14 @@ fn a_mod_hosted_elsewhere_is_packed_where_its_platform_accepts_it() {
 }
 
 #[test]
-fn mode_and_platform_narrow_the_build() {
+fn variant_and_platform_narrow_the_build() {
     let repo = repo(everywhere);
     let out = repo.path().join("dist");
     let report = build(
         repo.path(),
         &registry(),
         &Request {
-            mode: Some("server"),
+            variant: Some("server"),
             platform: Some("curseforge"),
             ..request(&out)
         },
@@ -316,7 +316,7 @@ fn mode_and_platform_narrow_the_build() {
     assert_eq!(
         report.artifacts,
         [Artifact {
-            mode: "server".into(),
+            variant: "server".into(),
             platform: "curseforge".into(),
             path: out.join("fixture-pack-server-1.2.3.zip"),
         }]
@@ -325,17 +325,17 @@ fn mode_and_platform_narrow_the_build() {
 }
 
 #[test]
-fn unknown_mode_or_platform_is_a_usage_error() {
+fn unknown_variant_or_platform_is_a_usage_error() {
     let repo = repo(everywhere);
     let out = repo.path().join("dist");
     let registry = registry();
-    let unknown_mode = Request {
-        mode: Some("lowend"),
+    let unknown_variant = Request {
+        variant: Some("lowend"),
         ..request(&out)
     };
-    let err = build(repo.path(), &registry, &unknown_mode).unwrap_err();
+    let err = build(repo.path(), &registry, &unknown_variant).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::Usage);
-    assert!(err.to_string().contains("unknown mode `lowend`"));
+    assert!(err.to_string().contains("unknown variant `lowend`"));
 
     let unknown_platform = Request {
         platform: Some("nope"),
@@ -382,12 +382,12 @@ fn report_serializes_for_machines() {
     let report = Report {
         version: "1.0.0".into(),
         artifacts: vec![Artifact {
-            mode: "default".into(),
+            variant: "default".into(),
             platform: "modrinth".into(),
             path: "dist/p-default-1.0.0.mrpack".into(),
         }],
         blocked: vec![Blocked {
-            mode: "default".into(),
+            variant: "default".into(),
             platform: "curseforge".into(),
             mods: vec![BlockedMod {
                 key: "iris".into(),
@@ -406,10 +406,10 @@ fn report_serializes_for_machines() {
         serde_json::json!({
             "version": "1.0.0",
             "artifacts": [
-                { "mode": "default", "platform": "modrinth", "path": "dist/p-default-1.0.0.mrpack" }
+                { "variant": "default", "platform": "modrinth", "path": "dist/p-default-1.0.0.mrpack" }
             ],
             "blocked": [
-                { "mode": "default", "platform": "curseforge", "mods": [{ "key": "iris", "reason": "why" }] }
+                { "variant": "default", "platform": "curseforge", "mods": [{ "key": "iris", "reason": "why" }] }
             ],
             "local": [{ "key": "custom", "path": "mods-local/custom.jar", "approved": false }],
             "warnings": ["check it"]
@@ -461,7 +461,7 @@ fn a_local_mod_is_embedded_in_every_pack_with_a_warning() {
         repo.path(),
         &registry(),
         &Request {
-            mode: Some("server"),
+            variant: Some("server"),
             ..request(&out)
         },
     )

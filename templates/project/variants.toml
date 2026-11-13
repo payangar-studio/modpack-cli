@@ -1,0 +1,17 @@
+# Variants of the pack. The default variant holds every mod of mods.lock.toml but
+# those it removes; every other variant starts from the default selection.
+# Reference of the syntax and of the conditions:
+# https://github.com/payangar-studio/modpack-cli/blob/main/docs/variants.md
+#
+# [conditions]                  # global: every variant, the default one included
+# deps-complete = true
+#
+# [variants.server]
+# description = "Dedicated server"
+# remove = ["sodium"]
+#
+# [variants.server.conditions]
+# side = "server"
+
+[default]
+description = "Full pack"

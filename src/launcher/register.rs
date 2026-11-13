@@ -38,7 +38,7 @@ pub fn instance_name(pack: &str) -> String {
 
 /// Builds the registration pack with `platform` (the one named
 /// [`super::PACK_PLATFORM`]), as `<out_dir>/<instance name>.mrpack`: the app
-/// names the instance after the file. `build` is the default mode's; its
+/// names the instance after the file. `build` is the default variant's; its
 /// `file_stem` is replaced.
 pub fn write_pack(platform: &dyn Platform, build: &PackBuild<'_>) -> Result<PathBuf> {
     let stem = instance_name(build.name);

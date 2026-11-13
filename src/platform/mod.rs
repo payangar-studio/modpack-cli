@@ -147,7 +147,7 @@ pub struct PackBuild<'a> {
     /// Version of the pack being built.
     pub version: &'a str,
     pub pack: &'a Pack,
-    /// The mods of the mode.
+    /// The mods of the variant.
     pub mods: Vec<&'a Entry>,
     /// Files to put under `overrides/`, in order: a later one replaces an
     /// earlier one at the same path.

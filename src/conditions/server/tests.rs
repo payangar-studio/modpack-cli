@@ -13,7 +13,7 @@ pub(in crate::conditions) fn machine_without_network() -> Machine<'static> {
     }
 }
 
-fn mode(keys: &[&str]) -> Resolved {
+fn variant(keys: &[&str]) -> Resolved {
     Resolved {
         name: "server".into(),
         keys: keys.iter().map(|k| (*k).to_owned()).collect(),
@@ -40,7 +40,7 @@ fn other_loaders_are_skipped_with_the_reason() {
     let status = server_starts(
         Path::new("."),
         &pack_manifest("forge", "52.0.1"),
-        &mode(&[]),
+        &variant(&[]),
         Duration::from_secs(1),
         &machine_without_network(),
     );
@@ -58,7 +58,7 @@ fn missing_java_is_skipped_and_says_how_to_point_to_one() {
     let status = server_starts(
         Path::new("."),
         &pack_manifest("fabric", "0.16.9"),
-        &mode(&[]),
+        &variant(&[]),
         Duration::from_secs(1),
         &machine_without_network(),
     );
@@ -159,7 +159,7 @@ fi
             server_starts(
                 self.repo.path(),
                 m,
-                &mode(keys),
+                &variant(keys),
                 Duration::from_secs(20),
                 &machine,
             )
@@ -345,7 +345,7 @@ fn real_fabric_server_starts() {
     let status = server_starts(
         repo.path(),
         &m,
-        &mode(&[]),
+        &variant(&[]),
         Duration::from_secs(300),
         &machine,
     );

@@ -314,7 +314,7 @@ fn link_claude_md(root: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::modes::Modes;
+    use crate::model::variants::Variants;
 
     fn values() -> InitValues {
         InitValues {
@@ -340,7 +340,7 @@ mod tests {
         for path in [
             "config/.gitkeep",
             "mods/.gitkeep",
-            "modes.toml",
+            "variants.toml",
             "overrides/.gitkeep",
         ] {
             assert!(paths.contains(&path.to_owned()), "{path} missing");
@@ -360,16 +360,16 @@ mod tests {
     }
 
     #[test]
-    fn skeleton_modes_have_a_default_mode_and_no_condition() {
+    fn skeleton_variants_have_a_default_variant_and_no_condition() {
         let template = project_files()
             .into_iter()
-            .find(|t| t.path == "modes.toml")
+            .find(|t| t.path == "variants.toml")
             .unwrap();
-        let modes = Modes::parse(std::str::from_utf8(template.contents).unwrap()).unwrap();
-        assert!(modes.conditions.is_empty());
-        assert!(modes.default.conditions.is_empty());
-        assert!(modes.default.remove.is_empty());
-        assert!(modes.modes.is_empty());
+        let variants = Variants::parse(std::str::from_utf8(template.contents).unwrap()).unwrap();
+        assert!(variants.conditions.is_empty());
+        assert!(variants.default.conditions.is_empty());
+        assert!(variants.default.remove.is_empty());
+        assert!(variants.variants.is_empty());
     }
 
     #[test]
@@ -393,7 +393,7 @@ mod tests {
         let manifest = Manifest::load(&root.join(manifest::FILE_NAME)).unwrap();
         assert_eq!(manifest.pack.loader_version, "21.1.77");
         assert!(manifest.mods.is_empty());
-        assert!(root.join("modes.toml").is_file());
+        assert!(root.join("variants.toml").is_file());
         assert!(root.join("overrides").is_dir());
     }
 
@@ -408,12 +408,12 @@ mod tests {
     #[test]
     fn init_keeps_existing_pack_files() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("modes.toml"), "# mine\n").unwrap();
+        fs::write(dir.path().join("variants.toml"), "# mine\n").unwrap();
         fs::write(dir.path().join(CLAUDE_MD), "mine\n").unwrap();
         fs::write(dir.path().join(".gitignore"), "target/\n").unwrap();
         init(dir.path(), values()).unwrap();
         let read = |p: &str| fs::read_to_string(dir.path().join(p)).unwrap();
-        assert_eq!(read("modes.toml"), "# mine\n");
+        assert_eq!(read("variants.toml"), "# mine\n");
         assert_eq!(read(CLAUDE_MD), "mine\n");
         assert!(read(".gitignore").starts_with("target/\n\n# modpack:begin\n"));
     }

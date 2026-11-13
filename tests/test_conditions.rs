@@ -32,7 +32,7 @@ fn json_report_is_printed_on_stdout() {
         .success();
     let report: serde_json::Value = serde_json::from_slice(&output.get_output().stdout).unwrap();
     assert_eq!(report["passed"], 3);
-    assert_eq!(report["modes"].as_array().unwrap().len(), 3);
+    assert_eq!(report["variants"].as_array().unwrap().len(), 3);
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn a_failed_condition_exits_with_the_blocked_code() {
         std::fs::copy(src.join(file), dir.path().join(file)).unwrap();
     }
     std::fs::write(
-        dir.path().join("modes.toml"),
+        dir.path().join("variants.toml"),
         "[default.conditions]\nside = \"server\"\n",
     )
     .unwrap();

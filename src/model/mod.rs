@@ -4,8 +4,8 @@
 pub mod installed;
 pub mod instance;
 pub mod manifest;
-pub mod modes;
 pub mod socle;
+pub mod variants;
 
 use std::fs;
 use std::io::Read;

@@ -171,7 +171,7 @@ fn the_return_skill_reads_the_status_json() {
     for field in [
         "modpack status --json",
         "instance.path",
-        "instance.mode",
+        "instance.variant",
         "unknown_jars",
         "drift",
     ] {

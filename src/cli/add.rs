@@ -8,9 +8,10 @@ use crate::store::download::{Http, Sources};
 
 #[derive(Debug, clap::Args)]
 #[command(after_help = "Examples:
-  modpack add sodium                                every mode
-  modpack add sodium --mode default --mode lite     the default and lite modes; every other mode removes it
-  modpack add ./tweaks.jar --mode server            the server mode only")]
+  modpack add sodium                                      every variant
+  modpack add sodium --variant default --variant lite     the default and lite variants; every other variant removes it
+  modpack add sodium --variant default                    the default variant only
+  modpack add ./tweaks.jar --variant server               the server variant only")]
 pub struct Args {
     /// Modrinth or CurseForge project (slug, id or URL), or path to a local jar
     #[arg(value_name = "MOD")]
@@ -18,11 +19,11 @@ pub struct Args {
     /// Version of the mod to add
     #[arg(long)]
     pub version: Option<String>,
-    /// Add the mod to this mode only; repeat for several modes. `default` names
-    /// the default mode: with it, the modes not named remove the mod. Without
-    /// --mode, the mod is in every mode
-    #[arg(long = "mode", value_name = "MODE")]
-    pub modes: Vec<String>,
+    /// Add the mod to this variant only; repeat for several variants. `default` names
+    /// the default variant: with it, the variants not named remove the mod. Without
+    /// --variant, the mod is in every variant
+    #[arg(long = "variant", value_name = "VARIANT")]
+    pub variants: Vec<String>,
     /// Direct URL of a local jar that no platform hosts
     #[arg(long)]
     pub url: Option<String>,
@@ -47,7 +48,7 @@ pub fn run(args: Args, ctx: &Context) -> Result<()> {
     let req = AddRequest {
         mod_ref: args.mod_ref,
         version: args.version,
-        modes: args.modes,
+        variants: args.variants,
         url: args.url,
         with_deps: args.with_deps,
         force: args.force,

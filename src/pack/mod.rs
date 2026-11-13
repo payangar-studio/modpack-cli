@@ -1,9 +1,9 @@
-//! Building the pack artifacts: one per mode and per platform.
+//! Building the pack artifacts: one per variant and per platform.
 //!
-//! Each artifact holds the mods of the resolved mode, and under `overrides/`
-//! the base `config/` then the mode's `overrides/<mode>/config/`. Before
+//! Each artifact holds the mods of the resolved variant, and under `overrides/`
+//! the base `config/` then the variant's `overrides/<variant>/config/`. Before
 //! building for a platform, every mod goes through its `pack_eligibility`; a
-//! mod it refuses blocks that platform for that mode only. The platform alone
+//! mod it refuses blocks that platform for that variant only. The platform alone
 //! decides, so a mod with no table for a platform (hosted on GitHub, say) may
 //! still be packed for it.
 //!
@@ -24,8 +24,8 @@ pub use version::{DEV_VERSION, version};
 
 use crate::error::{Context, Error, Result};
 use crate::model::manifest::{self, Entry, Manifest, normalize_key};
-use crate::model::modes::{self, Modes};
 use crate::model::socle::SocleConfig;
+use crate::model::variants::{self, Variants};
 use crate::ops::local::LocalMod;
 use crate::platform::{
     Capability, Eligibility, Operation, Override, PackBuild, Platform, Registry, unsupported,
@@ -39,8 +39,8 @@ pub const OUT_DIR: &str = "dist";
 /// What to build.
 #[derive(Debug, Clone)]
 pub struct Request<'a> {
-    /// One mode; every mode when `None`.
-    pub mode: Option<&'a str>,
+    /// One variant; every variant when `None`.
+    pub variant: Option<&'a str>,
     /// One platform; every platform that builds packs by code when `None`.
     pub platform: Option<&'a str>,
     pub out_dir: &'a Path,
@@ -61,15 +61,15 @@ pub struct Report {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Artifact {
-    pub mode: String,
+    pub variant: String,
     pub platform: String,
     pub path: PathBuf,
 }
 
-/// A mode a platform could not pack, and the mods that stopped it.
+/// A variant a platform could not pack, and the mods that stopped it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Blocked {
-    pub mode: String,
+    pub variant: String,
     pub platform: String,
     pub mods: Vec<BlockedMod>,
 }
@@ -81,21 +81,25 @@ pub struct BlockedMod {
 }
 
 impl Report {
-    /// The error to exit with when a platform was blocked for some mode.
+    /// The error to exit with when a platform was blocked for some variant.
     pub fn blocked_error(&self) -> Option<Error> {
         if self.blocked.is_empty() {
             return None;
         }
         let mut what = "some packs could not be built:".to_owned();
         for b in &self.blocked {
-            let _ = write!(what, "\n  - {} pack of mode `{}`:", b.platform, b.mode);
+            let _ = write!(
+                what,
+                "\n  - {} pack of variant `{}`:",
+                b.platform, b.variant
+            );
             for m in &b.mods {
                 let _ = write!(what, "\n      `{}`: {}", m.key, m.reason);
             }
         }
         Some(Error::blocked(
             what,
-            "leave these mods out of the mode in modes.toml, or build only the other platforms with --platform",
+            "leave these mods out of the variant in variants.toml, or build only the other platforms with --platform",
         ))
     }
 }
@@ -105,10 +109,10 @@ pub fn build(root: &Path, registry: &Registry, request: &Request<'_>) -> Result<
     let platforms = platforms(registry, request.platform)?;
     let name = SocleConfig::load(root)?.init.name;
     let manifest = Manifest::load(&root.join(manifest::FILE_NAME))?;
-    let modes = Modes::load(&root.join(modes::FILE_NAME))?;
-    let mode_names = match request.mode {
-        Some(mode) => vec![mode],
-        None => modes.names(),
+    let variants = Variants::load(&root.join(variants::FILE_NAME))?;
+    let variant_names = match request.variant {
+        Some(variant) => vec![variant],
+        None => variants.names(),
     };
     let base = config_files(&root.join("config"))?;
     fs::create_dir_all(request.out_dir)
@@ -127,15 +131,15 @@ pub fn build(root: &Path, registry: &Registry, request: &Request<'_>) -> Result<
     // Local mods embedded so far, each jar checked once against the manifest.
     let mut embedded: std::collections::BTreeMap<&str, (&Entry, PathBuf)> =
         std::collections::BTreeMap::new();
-    for mode in mode_names {
-        let resolved = modes.resolve(mode, &manifest)?;
+    for variant in variant_names {
+        let resolved = variants.resolve(variant, &manifest)?;
         let (local, mods): (Vec<&Entry>, Vec<&Entry>) = resolved
             .keys
             .iter()
             .map(|k| {
                 manifest
                     .get(k)
-                    .expect("a resolved mode only holds manifest keys")
+                    .expect("a resolved variant only holds manifest keys")
             })
             .partition(|e| e.is_local());
         let mut overrides = Vec::new();
@@ -152,15 +156,15 @@ pub fn build(root: &Path, registry: &Registry, request: &Request<'_>) -> Result<
         }
         overrides.extend(base.iter().cloned());
         overrides.extend(config_files(
-            &root.join("overrides").join(mode).join("config"),
+            &root.join("overrides").join(variant).join("config"),
         )?);
-        let file_stem = format!("{pack_slug}-{mode}-{}", request.version);
+        let file_stem = format!("{pack_slug}-{variant}-{}", request.version);
 
         for platform in &platforms {
             let blocked = ineligible(*platform, &mods)?;
             if !blocked.is_empty() {
                 report.blocked.push(Blocked {
-                    mode: mode.to_owned(),
+                    variant: variant.to_owned(),
                     platform: platform.name().to_owned(),
                     mods: blocked,
                 });
@@ -176,7 +180,7 @@ pub fn build(root: &Path, registry: &Registry, request: &Request<'_>) -> Result<
                 file_stem: &file_stem,
             })?;
             report.artifacts.push(Artifact {
-                mode: mode.to_owned(),
+                variant: variant.to_owned(),
                 platform: platform.name().to_owned(),
                 path,
             });

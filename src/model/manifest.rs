@@ -1,7 +1,7 @@
 //! `mods.lock.toml`: the list of the pack's mods.
 //!
 //! Each entry is a superset of a `files[]` entry of a `.mrpack` (`path`,
-//! `hashes`, `fileSize`, `env`, `downloads`), plus the stable `key` modes refer
+//! `hashes`, `fileSize`, `env`, `downloads`), plus the stable `key` variants refer
 //! to, an optional direct `url`, the `source` of a local mod and its
 //! approval, and one free table per platform. The core
 //! stores platform tables without reading them; only the platform named by the
@@ -48,7 +48,7 @@ pub struct Pack {
 /// tables, as TOML requires.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Entry {
-    /// Stable identifier of the mod, referenced by `modes.toml`. Never changes.
+    /// Stable identifier of the mod, referenced by `variants.toml`. Never changes.
     pub key: String,
     /// Path of the jar relative to the pack root, with `/` separators.
     pub path: String,

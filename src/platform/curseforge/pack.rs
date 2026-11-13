@@ -144,9 +144,9 @@ mod tests {
         let lock = fixture();
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path().join("base.toml");
-        let mode = dir.path().join("mode.toml");
+        let variant = dir.path().join("variant.toml");
         fs::write(&base, "base").unwrap();
-        fs::write(&mode, "mode").unwrap();
+        fs::write(&variant, "variant").unwrap();
         let path = build(&PackBuild {
             name: "Test Pack",
             version: "1.2.3",
@@ -158,7 +158,7 @@ mod tests {
                     path: "config/a.toml".into(),
                 },
                 Override {
-                    source: mode,
+                    source: variant,
                     path: "config/a.toml".into(),
                 },
             ],
@@ -189,7 +189,7 @@ mod tests {
                 "overrides": "overrides"
             })
         );
-        assert_eq!(read(&path, "overrides/config/a.toml"), "mode");
+        assert_eq!(read(&path, "overrides/config/a.toml"), "variant");
     }
 
     #[test]

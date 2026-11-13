@@ -1,4 +1,4 @@
-//! Checks of the conditions a mode declares in `modes.toml`, run by
+//! Checks of the conditions a variant declares in `variants.toml`, run by
 //! `modpack test`.
 //!
 //! Each check gives a [`Status`]: passed, failed with the reason, or skipped
@@ -13,9 +13,9 @@ mod statics;
 use std::path::Path;
 
 use crate::model::manifest::Manifest;
-use crate::model::modes::{Condition, Resolved, Side};
+use crate::model::variants::{Condition, Resolved, Side};
 
-/// Names of the conditions `modes.toml` knows, as `--condition` takes them.
+/// Names of the conditions `variants.toml` knows, as `--condition` takes them.
 pub const NAMES: [&str; 4] = ["side", "deps-complete", "server-starts", "client-starts"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,13 +51,13 @@ pub struct Checker<'a> {
 }
 
 impl Checker<'_> {
-    /// Checks one condition of a resolved mode.
-    pub fn check(&self, condition: &Condition, mode: &Resolved) -> Status {
+    /// Checks one condition of a resolved variant.
+    pub fn check(&self, condition: &Condition, variant: &Resolved) -> Status {
         match condition {
-            Condition::Side(side) => statics::side(*side, self.manifest, mode),
-            Condition::DepsComplete => statics::deps_complete(self.manifest, mode),
+            Condition::Side(side) => statics::side(*side, self.manifest, variant),
+            Condition::DepsComplete => statics::deps_complete(self.manifest, variant),
             Condition::ServerStarts { timeout } => {
-                server::server_starts(self.root, self.manifest, mode, *timeout, self.machine)
+                server::server_starts(self.root, self.manifest, variant, *timeout, self.machine)
             }
             Condition::ClientStarts => Status::Skipped(
                 "client-starts is not implemented: starting the client without a real display is not settled yet"
@@ -67,7 +67,7 @@ impl Checker<'_> {
     }
 }
 
-/// The condition as written in `modes.toml`, for reports.
+/// The condition as written in `variants.toml`, for reports.
 pub fn label(condition: &Condition) -> String {
     match condition {
         Condition::Side(Side::Client) => "side = \"client\"".to_owned(),
@@ -85,7 +85,7 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn labels_read_like_modes_toml() {
+    fn labels_read_like_variants_toml() {
         assert_eq!(label(&Condition::Side(Side::Server)), "side = \"server\"");
         assert_eq!(label(&Condition::DepsComplete), "deps-complete");
         assert_eq!(
@@ -112,12 +112,12 @@ mod tests {
             manifest: &manifest,
             machine: &machine,
         };
-        let mode = Resolved {
+        let variant = Resolved {
             name: "default".into(),
             keys: Vec::new(),
             conditions: Vec::new(),
         };
-        let status = checker.check(&Condition::ClientStarts, &mode);
+        let status = checker.check(&Condition::ClientStarts, &variant);
         assert_eq!(status.name(), "skipped");
         assert!(status.reason().unwrap().contains("not implemented"));
     }

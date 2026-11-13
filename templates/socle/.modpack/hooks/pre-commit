@@ -1,8 +1,8 @@
 #!/bin/sh
 # Managed by modpack-cli; `modpack update` rewrites this file.
-# Regenerates mods.lock.toml from mods/ and mods-local/, checks modes.toml
+# Regenerates mods.lock.toml from mods/ and mods-local/, checks variants.toml
 # against it, and adds it to the commit with the jars of mods-local/, so that no
-# commit leaves with a stale list of mods, modes naming mods the pack does not
+# commit leaves with a stale list of mods, variants naming mods the pack does not
 # have, or a local mod whose jar is not committed. Without network the
 # platforms are skipped with a warning: the commit goes through.
 

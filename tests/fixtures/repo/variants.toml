@@ -1,6 +1,6 @@
-# Modes of the fixture pack. Hand-written, as in a real pack.
+# Variants of the fixture pack. Hand-written, as in a real pack.
 
-# Global conditions: every mode, the default one included.
+# Global conditions: every variant, the default one included.
 [conditions]
 deps-complete = true
 
@@ -11,14 +11,14 @@ remove = ["hardcore-tweaks"]
 [default.conditions]
 side = "client"
 
-[modes.server]
+[variants.server]
 description = "Dedicated server"
 remove = ["sodium", "iris", "jei"]
 
-[modes.server.conditions]
+[variants.server.conditions]
 side = "server"
 server-starts = { timeout = "180s" }
 
-[modes.hardcore]
+[variants.hardcore]
 description = "Hardcore"
 add = ["hardcore-tweaks"]

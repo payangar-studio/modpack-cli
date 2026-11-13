@@ -10,6 +10,7 @@ pub mod error;
 pub mod launcher;
 pub mod mode;
 pub mod model;
+pub mod pack;
 pub mod platform;
 pub mod prompt;
 pub mod secrets;

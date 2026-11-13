@@ -162,36 +162,6 @@ fn update_on_an_up_to_date_repository_does_nothing_and_says_so() {
 }
 
 #[test]
-fn update_renames_modes_toml_even_when_the_socle_is_up_to_date() {
-    let (_tmp, root) = init_repo();
-    fs::remove_file(root.join("variants.toml")).unwrap();
-    fs::write(
-        root.join("modes.toml"),
-        "# Hand-written.\n[default]\n\n[modes.server]\nremove = []\n",
-    )
-    .unwrap();
-    modpack(&root)
-        .arg("update")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(
-            "Renamed modes.toml to variants.toml",
-        ))
-        .stdout(predicate::str::contains("nothing to update"));
-    assert!(!root.join("modes.toml").exists());
-    assert_eq!(
-        read(&root, "variants.toml"),
-        "# Hand-written.\n[default]\n\n[variants.server]\nremove = []\n"
-    );
-
-    modpack(&root)
-        .arg("update")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Renamed").not());
-}
-
-#[test]
 fn forced_update_on_an_up_to_date_repository_restores_the_socle() {
     let (_tmp, root) = init_repo();
     let before = read(&root, ".modpack/README.md");

@@ -359,6 +359,74 @@ fn refusal_carries_the_reason_given_by_modrinth() {
 }
 
 #[test]
+fn a_taken_slug_names_the_field_to_set() {
+    let dir = repo(PAGE_TOML, None, &[]);
+    let api = Api::start();
+    api.mount(
+        Mock::given(method("POST"))
+            .and(path("/project"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+                "error": "invalid_input",
+                "description": "Slug is already taken!",
+            }))),
+    );
+    let page = Page::load(dir.path()).unwrap();
+    let err = push(&api.client(), &page, &token()).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Usage);
+    assert!(err.to_string().contains("Slug is already taken!"));
+    assert!(
+        err.hint().contains("`modrinth.slug` in page/page.toml"),
+        "{}",
+        err.hint()
+    );
+    assert!(
+        err.hint().contains("derived from the pack name"),
+        "{}",
+        err.hint()
+    );
+}
+
+#[test]
+fn a_new_slug_renames_the_existing_project() {
+    let with_slug = PAGE_TOML
+        .replacen("project_id = \"\"", &format!("project_id = \"{ID}\""), 1)
+        .replacen(
+            "license = \"MIT\"",
+            "license = \"MIT\"\nslug = \"better-pack\"",
+            1,
+        );
+    let dir = repo(&with_slug, None, &[]);
+    let api = Api::start();
+    api.serve_project(project(Some(cdn(b"icon bytes", ".png")), json!([])));
+    api.mount(
+        Mock::given(method("PATCH"))
+            .and(path(format!("/project/{ID}")))
+            .and(body_partial_json(json!({ "slug": "better-pack" })))
+            .respond_with(ResponseTemplate::new(204)),
+    );
+    let page = Page::load(dir.path()).unwrap();
+    let line = push(&api.client(), &page, &token()).unwrap();
+    assert!(
+        line.starts_with(&format!(
+            "modrinth: updated project better-pack ({ID}); slug changed from test-pack to better-pack"
+        )),
+        "{line}"
+    );
+
+    // Already renamed: the slug is not sent again.
+    let api = Api::start();
+    let mut renamed = project(Some(cdn(b"icon bytes", ".png")), json!([]));
+    renamed["slug"] = json!("better-pack");
+    api.serve_project(renamed);
+    api.accept_writes();
+    let line = push(&api.client(), &page, &token()).unwrap();
+    assert!(!line.contains("slug changed"), "{line}");
+    let edit = &api.requests()[1];
+    let body: Value = serde_json::from_slice(&edit.body).unwrap();
+    assert!(body.get("slug").is_none(), "{body}");
+}
+
+#[test]
 fn refused_token_points_to_auth() {
     let with_id = PAGE_TOML.replacen("project_id = \"\"", &format!("project_id = \"{ID}\""), 1);
     let dir = repo(&with_id, None, &[]);

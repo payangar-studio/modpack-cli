@@ -34,7 +34,7 @@ The Modrinth App must be installed for `modpack setup` to create the pack's inst
 | `modpack status [--json]` | Loaded mode, drift, jars unknown to the manifest, state of the manifest. The JSON format is in [`docs/status.md`](docs/status.md). |
 | `modpack test [mode] [--condition] [--json]` | Checks the conditions of a mode, or of all modes. |
 | `modpack pack [mode] [--platform] [--out] [--pack-version] [--json]` | Builds the `.mrpack` and the CurseForge zip of a mode, or of all modes, into `dist/`. |
-| `modpack page push [--platform]` | Pushes `page/` to the platforms that have an API (Modrinth) and names the skill to run for the others (CurseForge). Never in CI. |
+| `modpack page push [--platform]` | Pushes `page/` to the platforms that have an API (Modrinth, slug included once the project exists) and names the skill to run for the others (CurseForge). Never in CI. |
 | `modpack auth [secret] [--status] [--remove <secret>]` | Stores the platform secrets in the system keyring, with masked input. |
 
 Every command runs without a terminal (AI agent, git hook, CI): it then asks nothing, and a missing value is an error that names the argument to pass. Errors say what happened and what to do. Exit codes: `0` success, `1` internal failure, `2` usage error (missing or wrong argument, not in a modpack repository), `3` refused: overridable with `--force`, or a check that did not pass (a failed `modpack test` condition, a platform `modpack pack` cannot build for). `-v` and `-q` set how much is logged on stderr.

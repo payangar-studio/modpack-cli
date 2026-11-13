@@ -18,7 +18,8 @@ discord = ""
 [modrinth]
 # Written by `modpack page push` when it creates the project.
 project_id = ""
-# URL name at creation; empty: derived from the name.
+# URL name; empty: derived from the name when the project is created. A slug
+# set here later renames the project's URL on the next push.
 slug = ""
 # Featured categories (at most 3), then the others. Modrinth's list:
 # https://api.modrinth.com/v2/tag/category (project type `modpack`).

@@ -4,6 +4,7 @@
 //! each; merge conflicts on these lines are resolved by keeping both.
 
 pub mod cli;
+pub mod conditions;
 pub mod context;
 pub mod error;
 pub mod launcher;

@@ -30,8 +30,18 @@ impl Context {
         Ok(ctx)
     }
 
-    /// The repository root, for commands that only work inside a modpack repository.
+    /// The repository root, for commands that only work inside a modpack
+    /// repository. Checks the repository's socle version first: a newer socle
+    /// is refused, an older one gives a warning.
     pub fn require_root(&self) -> Result<&Path> {
+        let root = self.require_root_unchecked()?;
+        crate::socle::check_version(root)?;
+        Ok(root)
+    }
+
+    /// The repository root, without the socle version check. Only for
+    /// `modpack update`, which handles the version itself.
+    pub fn require_root_unchecked(&self) -> Result<&Path> {
         self.root.as_deref().ok_or_else(|| {
             Error::usage(
                 format!("not inside a modpack repository (no {SOCLE_DIR}/ found in this directory or above)"),

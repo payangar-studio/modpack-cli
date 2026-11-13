@@ -12,6 +12,8 @@ The design lives in `payangar-studio/environment`, `docs/design/00-cadrage.md` a
 - `src/prompt.rs`: "ask, or read the argument". Every value a command needs goes through it, so that every command can run without a terminal.
 - `src/error.rs`: error model. Every error says what happened and what to do. Exit codes: 0 success, 1 internal error, 2 usage error (missing argument), 3 blocked (drift or file edited by hand, overridable with `--force`).
 - `src/context.rs`: context passed to handlers (repository root found by walking up to `.modpack/`, prompt, verbosity).
+- `src/socle/`: what `modpack init` lays down and `modpack update` rewrites, the block markers, and the socle version check that `Context::require_root` runs for every command working in a repository.
+- `templates/`: templates embedded in the binary. `socle/`: files the socle owns, at their path in the pack repository, rewritten by `update`. `blocks/`: blocks between markers in `AGENTS.md` and `.gitignore`. `project/`: the pack skeleton, written once by `init`. Adding a file to `socle/` or `project/` needs no code change; each issue adds its templates under its own path.
 - `tests/`: integration tests of the binary; `tests/fixtures/`: their fixtures.
 
 ## Who edits what

@@ -102,7 +102,8 @@ fn command_help_shows_its_arguments() {
 
 #[test]
 fn every_command_is_not_implemented_yet() {
-    const IMPLEMENTED: &[&str] = &["install"];
+    // init and update are tested in tests/socle_cli.rs.
+    const IMPLEMENTED: &[&str] = &["init", "install", "update"];
     for words in COMMANDS.iter().filter(|w| !IMPLEMENTED.contains(&w[0])) {
         modpack()
             .args(*words)

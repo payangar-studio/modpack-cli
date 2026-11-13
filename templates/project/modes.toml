@@ -1,0 +1,15 @@
+# Modes of the pack. The default mode holds every mod of mods.lock.toml but
+# those it removes; every other mode starts from the default selection.
+#
+# [conditions]                  # global: every mode, the default one included
+# deps-complete = true
+#
+# [modes.server]
+# description = "Dedicated server"
+# remove = ["sodium"]
+#
+# [modes.server.conditions]
+# side = "server"
+
+[default]
+description = "Full pack"

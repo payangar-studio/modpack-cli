@@ -10,4 +10,5 @@ pub mod model;
 pub mod platform;
 pub mod prompt;
 pub mod secrets;
+pub mod socle;
 pub mod store;

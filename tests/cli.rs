@@ -26,7 +26,6 @@ const COMMANDS: &[&[&str]] = &[
     &["test"],
     &["pack"],
     &["page", "push"],
-    &["auth"],
 ];
 
 /// The binary without a terminal (assert_cmd pipes stdin and stdout) and

@@ -144,8 +144,19 @@ fi
 "#,
                 calls = calls.display()
             );
+            // `cp` writes the script, so that this process never holds a write
+            // descriptor on it: a test spawning a process meanwhile would hand
+            // that descriptor to its child until the child's exec, and running
+            // the script would fail with "Text file busy" (ETXTBSY).
+            let source = self.bin.path().join("java.sh");
+            fs::write(&source, script).unwrap();
             let path = self.bin.path().join("java");
-            fs::write(&path, script).unwrap();
+            let copied = std::process::Command::new("cp")
+                .arg(&source)
+                .arg(&path)
+                .status()
+                .unwrap();
+            assert!(copied.success());
             fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
             path
         }

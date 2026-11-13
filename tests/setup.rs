@@ -3,8 +3,9 @@
 //! directory and a local HTTP server for the jars.
 #![cfg(unix)]
 
+mod common;
+
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command as Process;
 
@@ -33,8 +34,7 @@ impl World {
         let tmp = tempfile::tempdir().unwrap();
         let app = tmp.path().join("bin/ModrinthApp");
         fs::create_dir_all(app.parent().unwrap()).unwrap();
-        fs::write(&app, FAKE_APP).unwrap();
-        fs::set_permissions(&app, fs::Permissions::from_mode(0o755)).unwrap();
+        common::write_executable(&app, FAKE_APP);
         let world = Self {
             root: tmp.path().join("pack"),
             tmp,

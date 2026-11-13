@@ -362,7 +362,7 @@ fn same_file_name(other: &Entry, path: &str) -> Error {
 }
 
 /// Whether `path` is under `mods-local/`.
-fn is_local_path(path: &str) -> bool {
+pub(crate) fn is_local_path(path: &str) -> bool {
     path.strip_prefix(LOCAL_DIR)
         .is_some_and(|rest| rest.starts_with('/'))
 }

@@ -12,7 +12,7 @@ The entry has source `local`, its path in `mods-local/`, its hashes and size, an
 
 `modpack install` never downloads a local mod, git holds it; it reports the jar as failed when it is missing from `mods-local/`, and never replaces it when it changed, even with `--force`. `modpack install`, `modpack variant load`, `modpack status`, `modpack manifest` and `modpack test` point such a jar to `git checkout -- mods-local/<jar>`, or to `modpack remove <key>`. `modpack variant load` (and the reload after `install`) copies it from `mods-local/` into the instance's `mods/`.
 
-A changed jar is rebuilt by `modpack manifest` under the same key, and loses its approval. `modpack remove <key>` takes the mod out of the pack and its jar out of git (`git rm`).
+A changed jar is rebuilt by `modpack manifest` under the same key, and loses its approval. `modpack remove <key>` takes the mod out of the pack and its jar out of git (`git rm`). Like `modpack add` replacing a local mod, it never deletes a jar git does not hold committed: it stops with exit code 3, unless `--force`.
 
 ## Replacing it once published
 

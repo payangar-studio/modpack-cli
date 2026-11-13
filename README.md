@@ -66,7 +66,7 @@ Pushing a `v*` tag on `main` of the pack:
 What each pack repository needs, once:
 
 - repository variables (Settings, Secrets and variables, Actions, Variables): `INFISICAL_URL`, the vault's URL, and `INFISICAL_IDENTITY_ID`, the id of `ci-minecraft`. Neither is a secret; an organization variable does not reach a private repository on GitHub Free. `MODPACK_PUBLISH_MODES` optionally lists the modes to publish, separated by spaces (all modes when unset);
-- the project ids in `page/page.toml`: `[modrinth] project_id`, written by `modpack page push`, and `[curseforge] project_id`, written by the `modpack-curseforge-page` skill.
+- the project ids in `page/page.toml`: `[modrinth] project_id`, written by `modpack page push`, and `[curseforge] project_id`, written by the `modpack-curseforge-page` skill. A platform whose project id is empty is skipped, with a notice in the run summary, and the run publishes to the others; a platform with a project that refuses a pack still fails the run.
 
 The secrets live in the vault project `minecraft`, environment `prod`, folder `/app`, under the names of the variables the CLI reads: `MODPACK_MODRINTH_TOKEN` and `MODPACK_CURSEFORGE_UPLOAD_TOKEN`. Nothing goes into GitHub secrets.
 
@@ -75,6 +75,8 @@ What gets published:
 - version `1.2.0` from tag `v1.2.0`. A suffix makes a prerelease: `-alpha…` is an alpha, any other suffix a beta;
 - the default mode as the version itself, every other mode as `<version>+<mode>` on Modrinth and `<name> <version> (<mode>)` on CurseForge;
 - the changelog is `changelogs/<version>.md` when it exists, else the tag's message.
+
+A Modrinth project deleted on Modrinth is recovered by emptying `[modrinth] project_id` in `page/page.toml`, then running `modpack page push`, which creates a new project and records its id. Commit it: the next tag publishes to the new project, while a tag made before it still reads the old id from its own `page/page.toml`.
 
 Running the workflow by hand (Actions, Publish, Run workflow) from the tag publishes again, to one platform only if needed, or with `dry-run` builds the packs and keeps them as a workflow artifact without reading the vault or publishing. A dry run also works from a branch, as version `0.0.0-dev`.
 

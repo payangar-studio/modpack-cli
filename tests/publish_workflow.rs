@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::Path;
+use std::process::Command as Process;
 
 use assert_cmd::Command;
 use modpack_cli::model::socle::{SocleConfig, SocleLock};
@@ -107,4 +108,92 @@ fn the_reusable_workflow_builds_the_packs_without_the_jars() {
     for step in ["modpack install", "modpack manifest"] {
         assert!(!workflow.contains(step), "the workflow runs `{step}`");
     }
+}
+
+fn reusable() -> String {
+    fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/publish-modpack.yml"),
+    )
+    .unwrap()
+}
+
+/// The `run` script of the step `name` of the reusable workflow.
+fn step_script(name: &str) -> String {
+    let workflow = reusable();
+    let mut lines = workflow
+        .lines()
+        .skip_while(|l| l.trim() != format!("- name: {name}"))
+        .skip_while(|l| l.trim() != "run: |")
+        .skip(1);
+    let indent = " ".repeat(10);
+    let mut script = String::new();
+    for line in lines.by_ref() {
+        if !line.is_empty() && !line.starts_with(&indent) {
+            break;
+        }
+        script.push_str(line.strip_prefix(&indent).unwrap_or(line));
+        script.push('\n');
+    }
+    assert!(!script.is_empty(), "no step `{name}`");
+    script
+}
+
+/// What the step `Find the projects` leaves: exit success, the variables it
+/// sets, and the run summary.
+fn find_projects(page_toml: &str, platforms: &str, dry_run: bool) -> (bool, String, String) {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("page")).unwrap();
+    fs::write(dir.path().join("page/page.toml"), page_toml).unwrap();
+    let env = dir.path().join("env");
+    let summary = dir.path().join("summary");
+    let status = Process::new("bash")
+        .args(["-e", "-c", &step_script("Find the projects")])
+        .current_dir(dir.path())
+        .env("GITHUB_ENV", &env)
+        .env("GITHUB_STEP_SUMMARY", &summary)
+        .env("PLATFORMS", platforms)
+        .env("DRY_RUN", dry_run.to_string())
+        .env("MODRINTH_INPUT", "")
+        .env("CURSEFORGE_INPUT", "")
+        .status()
+        .unwrap();
+    let read = |p: &Path| fs::read_to_string(p).unwrap_or_default();
+    (status.success(), read(&env), read(&summary))
+}
+
+const MODRINTH_ONLY: &str = "[modrinth]\nproject_id = \"AbC\"\n\n[curseforge]\nproject_id = \"\"\n";
+
+#[test]
+fn a_platform_without_project_is_skipped_with_a_notice() {
+    let (ok, env, summary) = find_projects(MODRINTH_ONLY, "modrinth curseforge", false);
+    assert!(ok);
+    assert!(env.contains("MODRINTH_PROJECT=AbC\n"), "{env}");
+    assert!(env.contains("PUBLISH_PLATFORMS=modrinth\n"), "{env}");
+    assert!(summary.contains("curseforge skipped"), "{summary}");
+    assert!(summary.contains("modpack-curseforge-page"), "{summary}");
+
+    // A dry run builds every platform asked.
+    let (ok, env, _) = find_projects(MODRINTH_ONLY, "modrinth curseforge", true);
+    assert!(ok);
+    assert!(
+        env.contains("PUBLISH_PLATFORMS=modrinth curseforge\n"),
+        "{env}"
+    );
+
+    // No platform left: nothing would be published, the run fails.
+    let (ok, _, _) = find_projects(MODRINTH_ONLY, "curseforge", false);
+    assert!(!ok);
+}
+
+#[test]
+fn only_the_platforms_with_a_project_are_built_and_published() {
+    let workflow = reusable();
+    assert!(step_script("Build the packs").contains("<<<\"$PUBLISH_PLATFORMS\""));
+    for platform in ["modrinth", "curseforge"] {
+        assert!(
+            workflow.contains(&format!("contains(env.PUBLISH_PLATFORMS, '{platform}')")),
+            "{platform}"
+        );
+    }
+    assert!(!workflow.contains("contains(inputs.platforms"));
 }

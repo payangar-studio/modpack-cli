@@ -161,16 +161,52 @@ jobs:
             fi
           done
 
+      # A platform the pack has no project on is skipped, not failed: a pack
+      # may live on one platform only. A dry run builds every platform asked.
+      - name: Find the projects
+        env:
+          PLATFORMS: ${{ inputs.platforms }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          MODRINTH_INPUT: ${{ inputs.modrinth-project }}
+          CURSEFORGE_INPUT: ${{ inputs.curseforge-project }}
+        run: |
+          page_id() {
+            python3 -c 'import pathlib, sys, tomllib; p = pathlib.Path("page/page.toml"); print(tomllib.loads(p.read_text()).get(sys.argv[1], {}).get("project_id", "") if p.exists() else "")' "$1"
+          }
+          modrinth="${MODRINTH_INPUT:-$(page_id modrinth)}"
+          curseforge="${CURSEFORGE_INPUT:-$(page_id curseforge)}"
+          echo "MODRINTH_PROJECT=$modrinth" >> "$GITHUB_ENV"
+          echo "CURSEFORGE_PROJECT=$curseforge" >> "$GITHUB_ENV"
+          publish=()
+          for platform in $PLATFORMS; do
+            case "$platform" in
+              modrinth) project="$modrinth" how="run \`modpack page push\` to create it" ;;
+              curseforge) project="$curseforge" how="create it with the modpack-curseforge-page skill" ;;
+              *) echo "::error::Unknown platform $platform: use modrinth, curseforge or both."; exit 1 ;;
+            esac
+            if [[ -z "$project" && "$DRY_RUN" != true ]]; then
+              message="$platform skipped: the pack has no $platform project ([$platform] project_id in page/page.toml is empty); $how, then run the workflow again from the tag."
+              echo "::notice::$message"
+              echo "- $message" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+            publish+=("$platform")
+          done
+          if [[ ${#publish[@]} -eq 0 ]]; then
+            echo "::error::Nothing to publish: none of the platforms ($PLATFORMS) has a project for this pack."
+            exit 1
+          fi
+          echo "PUBLISH_PLATFORMS=${publish[*]}" >> "$GITHUB_ENV"
+
       # `pack` builds from the manifest, config and overrides alone: no jar is
       # downloaded, so the CI needs no CurseForge API key.
       - name: Build the packs
         id: pack
         env:
           MODES: ${{ inputs.modes }}
-          PLATFORMS: ${{ inputs.platforms }}
         run: |
           read -ra modes <<<"$MODES"
-          read -ra platforms <<<"$PLATFORMS"
+          read -ra platforms <<<"$PUBLISH_PLATFORMS"
           # Both platforms are what `pack` builds when given none.
           platform_arg=()
           if [[ ${#platforms[@]} -eq 1 ]]; then platform_arg=(--platform "${platforms[0]}"); fi
@@ -223,15 +259,9 @@ jobs:
           retention-days: 7
 
       - name: Publish to Modrinth
-        if: ${{ !cancelled() && !inputs.dry-run && steps.pack.outcome == 'success' && contains(inputs.platforms, 'modrinth') }}
-        env:
-          PROJECT: ${{ inputs.modrinth-project }}
+        if: ${{ !cancelled() && !inputs.dry-run && steps.pack.outcome == 'success' && contains(env.PUBLISH_PLATFORMS, 'modrinth') }}
         run: |
-          project="${PROJECT:-$(python3 -c 'import pathlib, tomllib; p = pathlib.Path("page/page.toml"); print(tomllib.loads(p.read_text()).get("modrinth", {}).get("project_id", "") if p.exists() else "")')}"
-          if [[ -z "$project" ]]; then
-            echo "::error::No Modrinth project: run \`modpack page push\` to create it, which writes [modrinth] project_id in page/page.toml."
-            exit 1
-          fi
+          project="$MODRINTH_PROJECT"
           if [[ -z "${MODPACK_MODRINTH_TOKEN:-}" ]]; then
             echo "::error::MODPACK_MODRINTH_TOKEN is missing from $VAULT_PROJECT:$VAULT_PATH in the vault."
             exit 1
@@ -261,15 +291,9 @@ jobs:
           exit "$failed"
 
       - name: Publish to CurseForge
-        if: ${{ !cancelled() && !inputs.dry-run && steps.pack.outcome == 'success' && contains(inputs.platforms, 'curseforge') }}
-        env:
-          PROJECT: ${{ inputs.curseforge-project }}
+        if: ${{ !cancelled() && !inputs.dry-run && steps.pack.outcome == 'success' && contains(env.PUBLISH_PLATFORMS, 'curseforge') }}
         run: |
-          project="${PROJECT:-$(python3 -c 'import pathlib, tomllib; p = pathlib.Path("page/page.toml"); print(tomllib.loads(p.read_text()).get("curseforge", {}).get("project_id", "") if p.exists() else "")')}"
-          if [[ -z "$project" ]]; then
-            echo "::error::No CurseForge project: create it with the modpack-curseforge-page skill, which writes [curseforge] project_id in page/page.toml."
-            exit 1
-          fi
+          project="$CURSEFORGE_PROJECT"
           if [[ -z "${MODPACK_CURSEFORGE_UPLOAD_TOKEN:-}" ]]; then
             echo "::error::MODPACK_CURSEFORGE_UPLOAD_TOKEN is missing from $VAULT_PROJECT:$VAULT_PATH in the vault."
             exit 1

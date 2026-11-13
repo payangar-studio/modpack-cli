@@ -57,7 +57,14 @@ pub fn add(
     let mut manifest = load_or_new(root)?;
 
     let local = Path::new(&req.mod_ref);
-    let key = if local.is_file() {
+    let existing = if req.with_deps && req.version.is_none() && !local.is_file() {
+        in_pack(sources, &manifest, &req.mod_ref)
+    } else {
+        None
+    };
+    let key = if let Some(key) = &existing {
+        key.clone()
+    } else if local.is_file() {
         if req.version.is_some() {
             return Err(Error::usage(
                 "--version only applies to a mod from a platform",
@@ -98,8 +105,18 @@ pub fn add(
         out,
     )?;
     manifest.save(&root.join(manifest::FILE_NAME))?;
+    if existing.is_some() {
+        // The mod was already there: only its dependencies are new.
+        added.remove(0);
+        if added.is_empty() {
+            writeln!(
+                out,
+                "`{key}` is already in the pack, with every required dependency"
+            )?;
+        }
+    }
 
-    if let Some(mode) = mode {
+    if let Some(mode) = mode.filter(|_| !added.is_empty()) {
         modes_edit::edit(root, |doc| {
             added
                 .iter()
@@ -137,6 +154,22 @@ pub fn remove(root: &Path, key: &str, out: &mut dyn Write) -> Result<()> {
         writeln!(out, "removed `{key}` from the modes that listed it")?;
     }
     Ok(())
+}
+
+/// Key of the mod `query` names when the manifest already holds it: by key,
+/// else by project on the platform that resolves it. A failed lookup counts
+/// as not held: adding it then reports the failure.
+fn in_pack(sources: Sources<'_>, manifest: &Manifest, query: &str) -> Option<String> {
+    if manifest.get(query).is_some() {
+        return Some(query.to_owned());
+    }
+    let (platform, candidates) = resolve(sources, None, query, manifest).ok()?;
+    let section = &candidates.first()?.section;
+    manifest
+        .mods
+        .iter()
+        .find(|e| same_project(e.platform(platform.name()), section))
+        .map(|e| e.key.clone())
 }
 
 /// How to pick a version among several.
@@ -486,7 +519,8 @@ fn add_dependencies(
     if !go {
         writeln!(
             out,
-            "add them with `modpack add <mod> --with-deps`, or one by one with `modpack add`"
+            "add them with `modpack add {} --with-deps`, or one by one with `modpack add`",
+            added[0]
         )?;
         return Ok(());
     }
@@ -764,17 +798,20 @@ mod tests {
         assert!(!root.path().join(manifest::FILE_NAME).exists());
     }
 
-    fn with_dependency() -> Registry {
+    /// `sodium` needs `fabric-api`, which needs `fabric-loader-lib`.
+    fn dependency_chain() -> FakePlatform {
         let mut sodium = FakeMod::new("sodium");
         sodium.dependencies = vec!["fabric-api".into()];
         let mut fabric = FakeMod::new("fabric-api");
         fabric.dependencies = vec!["fabric-loader-lib".into()];
-        Registry::new(vec![Box::new(
-            FakePlatform::new("fake")
-                .with(sodium)
-                .with(fabric)
-                .with(FakeMod::new("fabric-loader-lib")),
-        )])
+        FakePlatform::new("fake")
+            .with(sodium)
+            .with(fabric)
+            .with(FakeMod::new("fabric-loader-lib"))
+    }
+
+    fn with_dependency() -> Registry {
+        Registry::new(vec![Box::new(dependency_chain())])
     }
 
     #[test]
@@ -788,7 +825,7 @@ mod tests {
             ),
             "{out}"
         );
-        assert!(out.contains("--with-deps"), "{out}");
+        assert!(out.contains("`modpack add sodium --with-deps`"), "{out}");
         assert!(load(root.path()).get("fabric-api").is_none());
     }
 
@@ -825,6 +862,47 @@ mod tests {
         assert!(
             modes.contains("add = [\"sodium\", \"fabric-api\", \"fabric-loader-lib\"]"),
             "{modes}\n{out}"
+        );
+    }
+
+    #[test]
+    fn with_deps_on_a_mod_in_the_pack_adds_only_its_dependencies() {
+        let root = repo();
+        fs::write(root.path().join("modes.toml"), MODES).unwrap();
+        let registry = Registry::new(vec![Box::new(TwoVersions(dependency_chain()))]);
+        let mut req = request("sodium");
+        req.version = Some("0.9.0".into());
+        run_add(root.path(), &registry, &req).0.unwrap();
+
+        // No --version although two versions fit, and no second "added `sodium`".
+        let mut req = request("sodium");
+        req.with_deps = true;
+        let (result, out) = run_add(root.path(), &registry, &req);
+        assert_eq!(result.unwrap(), "sodium");
+        assert!(!out.contains("added `sodium`"), "{out}");
+        assert!(out.contains("added `fabric-api`"), "{out}");
+        assert!(out.contains("added `fabric-loader-lib`"), "{out}");
+        assert!(root.path().join("mods/sodium-1.0.0.jar").is_file());
+
+        let (result, out) = run_add(root.path(), &registry, &req);
+        result.unwrap();
+        assert_eq!(
+            out,
+            "`sodium` is already in the pack, with every required dependency\n"
+        );
+
+        // Found by its project when the key is not the slug.
+        let path = root.path().join(manifest::FILE_NAME);
+        let mut manifest = load(root.path());
+        let mut renamed = manifest.remove("sodium").unwrap();
+        renamed.key = "rubidium".into();
+        manifest.upsert(renamed);
+        manifest.save(&path).unwrap();
+        let (result, out) = run_add(root.path(), &registry, &req);
+        assert_eq!(result.unwrap(), "rubidium");
+        assert!(
+            out.starts_with("`rubidium` is already in the pack"),
+            "{out}"
         );
     }
 

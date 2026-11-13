@@ -20,7 +20,8 @@ pub struct Args {
     /// Direct URL of a local jar that no platform hosts
     #[arg(long)]
     pub url: Option<String>,
-    /// Add the missing required dependencies without asking
+    /// Add the missing required dependencies without asking; on a mod already
+    /// in the pack, add only those
     #[arg(long)]
     pub with_deps: bool,
 }

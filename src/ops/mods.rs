@@ -16,7 +16,7 @@ use super::modes_edit;
 use crate::error::{Context, Error, Result};
 use crate::model::manifest::{self, Entry, Env, Hashes, Manifest, Pack};
 use crate::model::modes::DEFAULT_MODE;
-use crate::platform::{Candidate, Download, Platform};
+use crate::platform::{Candidate, Download, Platform, ProjectName};
 use crate::prompt::Prompt;
 use crate::store::download::{Sources, download};
 use crate::store::hash::{copy_hashing, hash_file};
@@ -470,9 +470,12 @@ fn add_dependencies(
     added: &mut Vec<String>,
     out: &mut dyn Write,
 ) -> Result<()> {
-    let missing = missing_dependencies(manifest, added);
+    let mut missing = missing_dependencies(manifest, added);
     if missing.is_empty() {
         return Ok(());
+    }
+    for dep in &mut missing {
+        dep.name = name_of(sources, dep);
     }
     writeln!(out, "required dependencies missing from the pack:")?;
     for dep in &missing {
@@ -519,6 +522,19 @@ fn add_dependencies(
     }
 }
 
+/// Slug and title of a dependency, from its platform. A failed lookup (no
+/// network, no API key) leaves the dependency named by its id.
+fn name_of(sources: Sources<'_>, dep: &MissingDependency) -> Option<ProjectName> {
+    let platform = sources.registry.find(&dep.platform)?;
+    match platform.project_name(&dep.id) {
+        Ok(name) => name,
+        Err(err) => {
+            tracing::debug!(platform = dep.platform, id = dep.id, "{}", first_line(&err));
+            None
+        }
+    }
+}
+
 /// A required dependency no mod of the manifest provides.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MissingDependency {
@@ -527,15 +543,24 @@ pub struct MissingDependency {
     pub id: String,
     /// Key of the mod that needs it.
     pub needed_by: String,
+    /// How the platform names the project, when it was asked.
+    pub name: Option<ProjectName>,
 }
 
 impl std::fmt::Display for MissingDependency {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} project `{}`, needed by `{}`",
-            self.platform, self.id, self.needed_by
-        )
+        match &self.name {
+            Some(name) => write!(
+                f,
+                "`{}` ({}, {} id `{}`), needed by `{}`",
+                name.slug, name.title, self.platform, self.id, self.needed_by
+            ),
+            None => write!(
+                f,
+                "{} project `{}`, needed by `{}`",
+                self.platform, self.id, self.needed_by
+            ),
+        }
     }
 }
 
@@ -564,6 +589,7 @@ pub fn missing_dependencies(manifest: &Manifest, keys: &[String]) -> Vec<Missing
                     platform: platform.clone(),
                     id,
                     needed_by: entry.key.clone(),
+                    name: None,
                 });
             }
         }
@@ -758,12 +784,26 @@ mod tests {
         result.unwrap();
         assert!(
             out.contains(
-                "missing from the pack:\n  - fake project `fabric-api`, needed by `sodium`\n"
+                "missing from the pack:\n  - `fabric-api` (Title of fabric-api, fake id `fabric-api`), needed by `sodium`\n"
             ),
             "{out}"
         );
         assert!(out.contains("--with-deps"), "{out}");
         assert!(load(root.path()).get("fabric-api").is_none());
+    }
+
+    #[test]
+    fn dependency_the_platform_cannot_name_keeps_its_id() {
+        let root = repo();
+        let mut sodium = FakeMod::new("sodium");
+        sodium.dependencies = vec!["eXts2L7r".into()];
+        let registry = Registry::new(vec![Box::new(FakePlatform::new("fake").with(sodium))]);
+        let (result, out) = run_add(root.path(), &registry, &request("sodium"));
+        result.unwrap();
+        assert!(
+            out.contains("  - fake project `eXts2L7r`, needed by `sodium`\n"),
+            "{out}"
+        );
     }
 
     #[test]

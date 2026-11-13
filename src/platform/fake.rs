@@ -12,6 +12,7 @@ use sha2::{Digest, Sha512};
 
 use super::{
     Candidate, Capability, Download, Eligibility, Jar, Match, Operation, PackBuild, Platform,
+    ProjectName,
 };
 use crate::error::{Error, Result};
 use crate::model::manifest::{Entry, Env, Pack};
@@ -20,6 +21,7 @@ use crate::model::manifest::{Entry, Env, Pack};
 #[derive(Debug, Clone)]
 pub struct FakeMod {
     pub slug: String,
+    pub title: String,
     pub file_name: String,
     pub bytes: Vec<u8>,
     pub env: Env,
@@ -33,6 +35,7 @@ impl FakeMod {
     pub fn new(slug: &str) -> Self {
         Self {
             slug: slug.to_owned(),
+            title: format!("Title of {slug}"),
             file_name: format!("{slug}-1.0.0.jar"),
             bytes: slug.as_bytes().to_vec(),
             env: Env::default(),
@@ -151,6 +154,13 @@ impl Platform for FakePlatform {
             .platform_mut(&self.name)
             .insert("dependencies".into(), toml::Value::Array(deps));
         Ok(())
+    }
+
+    fn project_name(&self, id: &str) -> Result<Option<ProjectName>> {
+        Ok(self.by_slug(id).map(|m| ProjectName {
+            slug: m.slug.clone(),
+            title: m.title.clone(),
+        }))
     }
 
     fn download(&self, entry: &Entry) -> Result<Download> {

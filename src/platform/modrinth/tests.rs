@@ -135,6 +135,30 @@ fn jar(sha512: String) -> Jar {
 }
 
 #[test]
+fn project_name_gives_slug_and_title() {
+    let api = Api::start();
+    api.mount(
+        Mock::given(method("GET"))
+            .and(path("/project/AANobbMI"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(project_json())),
+    );
+    api.mount(
+        Mock::given(method("GET"))
+            .and(path("/project/unknown"))
+            .respond_with(ResponseTemplate::new(404)),
+    );
+    let platform = api.platform();
+    assert_eq!(
+        platform.project_name("AANobbMI").unwrap(),
+        Some(ProjectName {
+            slug: "sodium".into(),
+            title: "Sodium".into()
+        })
+    );
+    assert_eq!(platform.project_name("unknown").unwrap(), None);
+}
+
+#[test]
 fn registered_under_its_name_with_page_by_api() {
     let registry = Registry::builtin();
     let modrinth = registry.get("modrinth").unwrap();

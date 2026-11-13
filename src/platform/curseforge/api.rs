@@ -38,6 +38,8 @@ pub struct Mod {
     pub id: u64,
     pub slug: String,
     #[serde(default)]
+    pub name: String,
+    #[serde(default)]
     pub links: Links,
 }
 

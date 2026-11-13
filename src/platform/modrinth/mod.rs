@@ -18,6 +18,7 @@ use serde_json::json;
 
 use super::{
     Candidate, Capability, Download, Eligibility, Jar, Match, Operation, PackBuild, Platform,
+    ProjectName,
 };
 use crate::error::{Error, Result};
 use crate::model::manifest::{Entry, Env, Pack, Support};
@@ -101,6 +102,13 @@ impl Platform for Modrinth {
 
     fn capability(&self, _op: Operation) -> Capability {
         Capability::Api
+    }
+
+    fn project_name(&self, id: &str) -> Result<Option<ProjectName>> {
+        Ok(self.project(id)?.map(|p| ProjectName {
+            slug: p.slug,
+            title: p.title,
+        }))
     }
 
     fn identify(&self, jars: &[Jar]) -> Result<Vec<Option<Match>>> {
@@ -346,6 +354,8 @@ fn encode_segment(raw: &str) -> String {
 struct Project {
     id: String,
     slug: String,
+    #[serde(default)]
+    title: String,
     client_side: String,
     server_side: String,
 }

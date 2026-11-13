@@ -21,6 +21,7 @@ use tracing::warn;
 
 use super::{
     Candidate, Capability, Download, Eligibility, Jar, Match, Operation, PackBuild, Platform,
+    ProjectName,
 };
 use crate::error::{Context, Error, Result};
 use crate::model::manifest::{Entry, Pack};
@@ -199,6 +200,16 @@ impl Platform for CurseForge {
             Operation::PushPage => Capability::Skill("modpack-curseforge-page"),
             _ => Capability::Api,
         }
+    }
+
+    fn project_name(&self, id: &str) -> Result<Option<ProjectName>> {
+        let Ok(id) = id.parse() else {
+            return Ok(None);
+        };
+        Ok(self.api()?.get_mod(id)?.map(|m| ProjectName {
+            slug: m.slug,
+            title: m.name,
+        }))
     }
 
     fn identify(&self, jars: &[Jar]) -> Result<Vec<Option<Match>>> {

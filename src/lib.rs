@@ -6,6 +6,7 @@
 pub mod cli;
 pub mod context;
 pub mod error;
+pub mod launcher;
 pub mod model;
 pub mod platform;
 pub mod prompt;

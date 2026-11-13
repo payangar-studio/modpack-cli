@@ -62,7 +62,7 @@ pub struct LoadReport {
     pub removed: Vec<String>,
     /// Jars unknown to the manifest, left as they are.
     pub unknown: Vec<String>,
-    /// Config files written into the instance.
+    /// Config files written into the instance: new, or with other content.
     pub written: Vec<String>,
     /// Config files the CLI wrote for another mode, removed from the instance.
     pub config_removed: Vec<String>,
@@ -222,9 +222,12 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
     }
 
     for (rel, source) in &configs {
-        copy_file(source, &instance.join(rel))?;
+        let dest = instance.join(rel);
+        if !(dest.is_file() && same_content(source, &dest)?) {
+            copy_file(source, &dest)?;
+            report.written.push(rel.clone());
+        }
         new_state.record(&instance, rel)?;
-        report.written.push(rel.clone());
     }
     // A config file the CLI wrote that this mode does not have, such as the
     // previous mode's override, goes. Changed since, it is drift: past the
@@ -414,6 +417,13 @@ impl fmt::Display for LoadReport {
             ),
             ("not in the manifest, left as is", &self.unknown),
         ];
+        // Everything but the jars left as they are.
+        if lines[..lines.len() - 1]
+            .iter()
+            .all(|(_, items)| items.is_empty())
+        {
+            writeln!(f, "nothing changed in the instance")?;
+        }
         for (label, items) in lines {
             if !items.is_empty() {
                 writeln!(f, "{label}: {}", items.join(", "))?;

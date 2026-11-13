@@ -165,6 +165,24 @@ fn first_load_copies_the_mode_jars_and_writes_the_config() {
 }
 
 #[test]
+fn loading_again_reports_only_what_changed() {
+    let s = Setup::new();
+    s.load(modes::DEFAULT_MODE, false).unwrap();
+    let report = s.load(modes::DEFAULT_MODE, false).unwrap();
+    assert!(report.written.is_empty() && report.copied.is_empty());
+    let text = report.to_string();
+    assert!(text.contains("nothing changed in the instance"), "{text}");
+    assert!(!text.contains("config written"), "{text}");
+
+    // Only the file the mode changes is written.
+    write(s.root(), "config/sub/b.toml", "new b");
+    let report = s.load(modes::DEFAULT_MODE, false).unwrap();
+    assert_eq!(report.written, ["config/sub/b.toml"]);
+    assert!(!report.to_string().contains("nothing changed"));
+    assert_eq!(s.read("config/sub/b.toml"), "new b");
+}
+
+#[test]
 fn state_reflects_exactly_the_files_written() {
     let s = Setup::new();
     s.load(modes::DEFAULT_MODE, false).unwrap();

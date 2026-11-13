@@ -12,4 +12,5 @@ pub mod platform;
 pub mod prompt;
 pub mod secrets;
 pub mod socle;
+pub mod status;
 pub mod store;

@@ -178,13 +178,14 @@ fn to_json(reports: &[ModeReport], passed: usize, failed: usize, skipped: usize)
             json!({ "mode": r.name, "conditions": conditions })
         })
         .collect();
-    json!({
+    // Pretty, like the JSON of `status` and `pack`.
+    serde_json::to_string_pretty(&json!({
         "modes": modes,
         "passed": passed,
         "failed": failed,
         "skipped": skipped,
-    })
-    .to_string()
+    }))
+    .expect("a JSON value always serializes")
 }
 
 #[cfg(test)]

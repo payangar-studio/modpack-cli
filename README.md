@@ -7,7 +7,7 @@
 On a machine set up with chezmoi, the catalogue installs `modpack` from this repository's releases. By hand, on Linux x86_64:
 
 ```sh
-version=0.1.0
+version=0.1.1
 curl -LO "https://github.com/payangar-studio/modpack-cli/releases/download/v$version/modpack-$version-x86_64-unknown-linux-musl.tar.gz"
 curl -LO "https://github.com/payangar-studio/modpack-cli/releases/download/v$version/modpack-$version-x86_64-unknown-linux-musl.tar.gz.sha256"
 sha256sum -c "modpack-$version-x86_64-unknown-linux-musl.tar.gz.sha256"
@@ -25,17 +25,19 @@ The Modrinth App must be installed for `modpack setup` to create the pack's inst
 | `modpack init [dir] --name --mc-version --loader --loader-version --author` | Creates a modpack repository: socle, layout, default mode. Asks for each value not given. |
 | `modpack setup [--no-launch]` | Prepares a clone on this machine: enables the git hooks, downloads the jars, registers the instance in the Modrinth App (one click to confirm the import), loads the default mode. Safe to run again. |
 | `modpack update [--force]` | Brings the repository's socle to this CLI's version. Stops on socle files edited by hand, unless `--force`. |
-| `modpack add <mod> [--version] [--mode] [--with-deps] [--url]` | Adds a mod from Modrinth or CurseForge (slug, id or URL) or from a local jar, and updates the manifest. Asks for the version when several fit. |
+| `modpack add <mod> [--version] [--mode] [--with-deps] [--url]` | Adds a mod from Modrinth or CurseForge (slug, id or URL) or from a local jar, and updates the manifest. Asks for the version when several fit. On a mod already in the pack, `--with-deps` adds only its missing dependencies. |
 | `modpack remove <key>` | Removes a mod from the repository and from the modes that list it. The only way a mod leaves the pack. |
-| `modpack manifest [--check]` | Updates `mods.lock.toml` from `mods/`: adds the new jars, rebuilds the entries whose jar changed. A jar missing from `mods/` keeps its entry, with a warning (not installed here is not removed). A jar `modpack install` downloaded that the manifest no longer lists is never added back. `--check` fails when it is stale. Run by the `pre-commit` hook. |
+| `modpack manifest [--check]` | Updates `mods.lock.toml` from `mods/`: adds the new jars, rebuilds the entries whose jar changed, and asks again the platforms an entry has no ids for (CurseForge ids missing because no Core API key was set, say). A jar missing from `mods/` keeps its entry, with a warning (not installed here is not removed). A jar `modpack install` downloaded that the manifest no longer lists is never added back. `--check` fails when it is stale. Both then check `modes.toml` against the manifest (unknown keys, unknown conditions). Run by the `pre-commit` hook. |
 | `modpack install [--force]` | Downloads the missing jars into `mods/`, removes the ones it downloaded that the manifest no longer lists (recorded in `.modpack/local/installed.toml`), then reloads the mode loaded in the instance. Run by the `post-merge` and `post-checkout` hooks. |
 | `modpack mode list` | Lists the modes and marks the loaded one. |
-| `modpack mode load <mode> [--force]` | Loads a mode into the instance: its jars, the base config and its overrides; removes the config files written for the previous mode. Refuses while Minecraft runs; stops on files changed in the instance, unless `--force`. |
+| `modpack mode load <mode> [--force]` | Loads a mode into the instance: its jars, the base config and its overrides; removes the config files written for the previous mode. Refuses while Minecraft runs; stops on files changed in the instance, and on config files of the instance it did not write that the mode would change, unless `--force`. |
 | `modpack status [--json]` | Loaded mode, drift, jars unknown to the manifest, state of the manifest. The JSON format is in [`docs/status.md`](docs/status.md). |
 | `modpack test [mode] [--condition] [--json]` | Checks the conditions of a mode, or of all modes. |
 | `modpack pack [mode] [--platform] [--out] [--pack-version] [--json]` | Builds the `.mrpack` and the CurseForge zip of a mode, or of all modes, into `dist/`. |
-| `modpack page push [--platform]` | Pushes `page/` to the platforms that have an API (Modrinth) and names the skill to run for the others (CurseForge). Never in CI. |
+| `modpack page push [--platform]` | Pushes `page/` to the platforms that have an API (Modrinth, slug included once the project exists) and names the skill to run for the others (CurseForge). Never in CI. |
 | `modpack auth [secret] [--status] [--remove <secret>]` | Stores the platform secrets in the system keyring, with masked input. |
+
+The modes of a pack and their conditions are written in `modes.toml`, described in [`docs/modes.md`](docs/modes.md).
 
 Every command runs without a terminal (AI agent, git hook, CI): it then asks nothing, and a missing value is an error that names the argument to pass. Errors say what happened and what to do. Exit codes: `0` success, `1` internal failure, `2` usage error (missing or wrong argument, not in a modpack repository), `3` refused: overridable with `--force`, or a check that did not pass (a failed `modpack test` condition, a platform `modpack pack` cannot build for). `-v` and `-q` set how much is logged on stderr.
 
@@ -66,7 +68,7 @@ Pushing a `v*` tag on `main` of the pack:
 What each pack repository needs, once:
 
 - repository variables (Settings, Secrets and variables, Actions, Variables): `INFISICAL_URL`, the vault's URL, and `INFISICAL_IDENTITY_ID`, the id of `ci-minecraft`. Neither is a secret; an organization variable does not reach a private repository on GitHub Free. `MODPACK_PUBLISH_MODES` optionally lists the modes to publish, separated by spaces (all modes when unset);
-- the project ids in `page/page.toml`: `[modrinth] project_id`, written by `modpack page push`, and `[curseforge] project_id`, written by the `modpack-curseforge-page` skill.
+- the project ids in `page/page.toml`: `[modrinth] project_id`, written by `modpack page push`, and `[curseforge] project_id`, written by the `modpack-curseforge-page` skill. A platform whose project id is empty is skipped, with a notice in the run summary, and the run publishes to the others; a platform with a project that refuses a pack still fails the run.
 
 The secrets live in the vault project `minecraft`, environment `prod`, folder `/app`, under the names of the variables the CLI reads: `MODPACK_MODRINTH_TOKEN` and `MODPACK_CURSEFORGE_UPLOAD_TOKEN`. Nothing goes into GitHub secrets.
 
@@ -74,7 +76,10 @@ What gets published:
 
 - version `1.2.0` from tag `v1.2.0`. A suffix makes a prerelease: `-alpha…` is an alpha, any other suffix a beta;
 - the default mode as the version itself, every other mode as `<version>+<mode>` on Modrinth and `<name> <version> (<mode>)` on CurseForge;
-- the changelog is `changelogs/<version>.md` when it exists, else the tag's message.
+- the changelog is `changelogs/<version>.md` when it exists, else the tag's message;
+- on each platform, the other modes first and the default mode last, so that the newest version is always the default mode's. When the default mode fails to publish, the run fails and its summary says so: the other modes may already be published, and the default mode is published alone by running the workflow by hand from the tag with modes `default`.
+
+A Modrinth project deleted on Modrinth is recovered by emptying `[modrinth] project_id` in `page/page.toml`, then running `modpack page push`, which creates a new project and records its id. Commit it: the next tag publishes to the new project, while a tag made before it still reads the old id from its own `page/page.toml`.
 
 Running the workflow by hand (Actions, Publish, Run workflow) from the tag publishes again, to one platform only if needed, or with `dry-run` builds the packs and keeps them as a workflow artifact without reading the vault or publishing. A dry run also works from a branch, as version `0.0.0-dev`.
 

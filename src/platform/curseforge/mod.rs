@@ -15,12 +15,14 @@ mod pack;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use api::{Api, File};
 use tracing::warn;
 
 use super::{
     Candidate, Capability, Download, Eligibility, Jar, Match, Operation, PackBuild, Platform,
+    ProjectName,
 };
 use crate::error::{Context, Error, Result};
 use crate::model::manifest::{Entry, Pack};
@@ -51,6 +53,8 @@ pub fn api_key() -> Option<String> {
 pub struct CurseForge {
     base_url: String,
     key: fn() -> Option<String>,
+    /// Whether `key` gives one, read once: packing asks for every mod.
+    has_key: OnceLock<bool>,
 }
 
 impl CurseForge {
@@ -63,6 +67,7 @@ impl CurseForge {
         Self {
             base_url: base_url.to_owned(),
             key,
+            has_key: OnceLock::new(),
         }
     }
 
@@ -199,6 +204,16 @@ impl Platform for CurseForge {
             Operation::PushPage => Capability::Skill("modpack-curseforge-page"),
             _ => Capability::Api,
         }
+    }
+
+    fn project_name(&self, id: &str) -> Result<Option<ProjectName>> {
+        let Ok(id) = id.parse() else {
+            return Ok(None);
+        };
+        Ok(self.api()?.get_mod(id)?.map(|m| ProjectName {
+            slug: m.slug,
+            title: m.name,
+        }))
     }
 
     fn identify(&self, jars: &[Jar]) -> Result<Vec<Option<Match>>> {
@@ -341,12 +356,17 @@ impl Platform for CurseForge {
     }
 
     fn pack_eligibility(&self, entry: &Entry) -> Result<Eligibility> {
-        Ok(match ids(entry) {
-            Ok(_) => Eligibility::Eligible,
-            Err(_) => Eligibility::Blocked {
-                reason: "not hosted on CurseForge: a CurseForge pack accepts it only if it is on CurseForge's approved list of third-party mods, which has no API; check it by hand".into(),
-            },
-        })
+        if ids(entry).is_ok() {
+            return Ok(Eligibility::Eligible);
+        }
+        let reason = if *self.has_key.get_or_init(|| (self.key)().is_some()) {
+            "not hosted on CurseForge: a CurseForge pack accepts it only if it is on CurseForge's approved list of third-party mods, which has no API; check it by hand".to_owned()
+        } else {
+            format!(
+                "no CurseForge ids in mods.lock.toml, and no CurseForge Core API key to look them up: store one with `modpack auth` or set {KEY_VAR}, then run `modpack manifest` to fill them"
+            )
+        };
+        Ok(Eligibility::Blocked { reason })
     }
 
     fn build_pack(&self, build: &PackBuild<'_>) -> Result<PathBuf> {

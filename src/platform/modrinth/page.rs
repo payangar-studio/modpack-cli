@@ -336,14 +336,21 @@ struct Changes {
 pub fn push(client: &Client, page: &Page, token: &Secret) -> Result<String> {
     let api = Api { client, token };
     let section = &page.modrinth;
+    let mut renamed = None;
     let (remote, created) = if section.project_id.trim().is_empty() {
         let remote = api.create(page)?;
         record_project_id(&page.root, &remote.id)?;
         (remote, true)
     } else {
         let id = section.project_id.trim();
-        let remote = api.project(id)?;
-        api.edit(&remote.id, page)?;
+        let mut remote = api.project(id)?;
+        // An empty slug is only derived from the name at creation: it never
+        // renames an existing project.
+        let wanted = section.slug.trim();
+        if !wanted.is_empty() && remote.slug.as_deref() != Some(wanted) {
+            renamed = Some(remote.slug.replace(wanted.to_owned()));
+        }
+        api.edit(&remote.id, page, renamed.is_some().then_some(wanted))?;
         (remote, false)
     };
     let mut changes = Changes {
@@ -361,6 +368,10 @@ pub fn push(client: &Client, page: &Page, token: &Secret) -> Result<String> {
     } else {
         format!("{NAME}: updated project {slug} ({})", remote.id)
     };
+    if let Some(old) = renamed {
+        let old = old.as_deref().unwrap_or("none");
+        line.push_str(&format!("; slug changed from {old} to {slug}"));
+    }
     if changes.icon {
         line.push_str("; icon uploaded");
     }
@@ -522,10 +533,14 @@ impl Api<'_> {
         read(response, "/project")
     }
 
-    /// Edits the texts, links, categories and license of the project.
-    fn edit(&self, id: &str, page: &Page) -> Result<()> {
+    /// Edits the texts, links, categories and license of the project, and
+    /// its slug when `slug` is given.
+    fn edit(&self, id: &str, page: &Page, slug: Option<&str>) -> Result<()> {
         let path = format!("/project/{}", encode_segment(id));
-        let data = fields(page);
+        let mut data = fields(page);
+        if let Some(slug) = slug {
+            data["slug"] = json!(slug);
+        }
         let response = self.client.call(&format!("PATCH {path}"), |agent, api| {
             agent
                 .patch(format!("{api}{path}"))
@@ -665,6 +680,12 @@ fn check(mut response: Response<Body>, path: &str) -> Result<Response<Body>> {
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Error::usage(
             what,
             "check the Modrinth token and its scopes (PROJECT_CREATE, PROJECT_WRITE), then store it with `modpack auth modrinth-token`",
+        ),
+        StatusCode::BAD_REQUEST if reason.to_ascii_lowercase().contains("slug") => Error::usage(
+            what,
+            format!(
+                "set `{NAME}.slug` in {DIR}/{PAGE_TOML} to a free slug (lowercase letters, digits and dashes); when it is empty, the slug is derived from the pack name"
+            ),
         ),
         StatusCode::BAD_REQUEST => Error::usage(what, format!("fix {DIR}/ accordingly")),
         _ => Error::internal(

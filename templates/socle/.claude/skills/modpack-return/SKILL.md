@@ -34,6 +34,7 @@ One JSON object on stdout (exit code 0 whatever it reports). What matters here:
 - `instance.path`: the instance directory. `instance.mode`: the mode loaded last (`null`: none yet).
 - `instance.unknown_jars`: jars of the instance's `mods/` that no manifest entry has, by hash, with `path` relative to the instance, `sha1` and `sha512`.
 - `instance.drift`: files the CLI wrote into the instance that were changed or deleted since, relative to the instance.
+- `instance.disabled`: the jars of `drift` the user disabled in the Modrinth App (renamed `<jar>.disabled`).
 - `manifest.stale`, `missing_jars`: state of the repository itself. Mention them, they are not this skill's job (`modpack manifest`, `modpack install`).
 
 When `unknown_jars` and `drift` are both empty, say that the instance holds nothing to bring back, and stop.
@@ -73,7 +74,7 @@ Remove the probe when done: `rm -rf "$probe"`.
 For each path of `drift`, relative to the instance:
 
 - **A config file** (`config/<rest>`): it comes from `overrides/<mode>/config/<rest>` when that file exists for the loaded mode, from `config/<rest>` otherwise. Show the difference: `diff -u <repository file> "<instance.path>/config/<rest>"`. When the file is gone from the instance, say so.
-- **A jar** (`mods/<file>`): a jar of the mode was deleted or replaced in the instance. Find its entry by its `path` in `mods.lock.toml`. Usually the user removed the mod from the app, or updated it (step 2 then shows the new jar).
+- **A jar** (`mods/<file>`): a jar of the mode was deleted or replaced in the instance. Find its entry by its `path` in `mods.lock.toml`. Usually the user removed the mod from the app, or updated it (step 2 then shows the new jar). When it is in `disabled`, the user turned the mod off in the app.
 
 ## 4. Propose
 
@@ -85,7 +86,7 @@ Present everything at once, mod by mod, then file by file. For each unknown jar:
 - conflicts or target mismatches found in step 2;
 - the proposal: integrate it, into every mode or into one mode only, or leave it in the instance.
 
-For each drifted config file: keep the change in the place it came from, or move it to the other one (`config/` applies to every mode, `overrides/<mode>/config/` to that mode only), or drop it. For a jar deleted or replaced in the instance: remove the mod from the pack, update it, or restore it.
+For each drifted config file: keep the change in the place it came from, or move it to the other one (`config/` applies to every mode, `overrides/<mode>/config/` to that mode only), or drop it. For a jar deleted or replaced in the instance: remove the mod from the pack, update it, or restore it. For a jar disabled in the app: remove the mod from the pack or from the loaded mode, or enable it again.
 
 Ask the user which proposals to apply, with AskUserQuestion when there are few choices, in plain text otherwise.
 

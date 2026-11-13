@@ -165,6 +165,24 @@ fn first_load_copies_the_mode_jars_and_writes_the_config() {
 }
 
 #[test]
+fn loading_again_reports_only_what_changed() {
+    let s = Setup::new();
+    s.load(modes::DEFAULT_MODE, false).unwrap();
+    let report = s.load(modes::DEFAULT_MODE, false).unwrap();
+    assert!(report.written.is_empty() && report.copied.is_empty());
+    let text = report.to_string();
+    assert!(text.contains("nothing changed in the instance"), "{text}");
+    assert!(!text.contains("config written"), "{text}");
+
+    // Only the file the mode changes is written.
+    write(s.root(), "config/sub/b.toml", "new b");
+    let report = s.load(modes::DEFAULT_MODE, false).unwrap();
+    assert_eq!(report.written, ["config/sub/b.toml"]);
+    assert!(!report.to_string().contains("nothing changed"));
+    assert_eq!(s.read("config/sub/b.toml"), "new b");
+}
+
+#[test]
 fn state_reflects_exactly_the_files_written() {
     let s = Setup::new();
     s.load(modes::DEFAULT_MODE, false).unwrap();
@@ -327,6 +345,38 @@ fn drift_blocks_then_force_overwrites() {
 }
 
 #[test]
+fn a_jar_disabled_in_the_app_is_drift_and_force_restores_it() {
+    let s = Setup::new();
+    s.load(modes::DEFAULT_MODE, false).unwrap();
+    let jar = s.instance().join("mods/b-1.0.0.jar");
+    let disabled = s.instance().join("mods/b-1.0.0.jar.disabled");
+    fs::rename(&jar, &disabled).unwrap();
+
+    let err = s.load(modes::DEFAULT_MODE, false).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Blocked);
+    assert!(
+        err.to_string()
+            .contains("\n  - mods/b-1.0.0.jar (disabled in the app)"),
+        "{err}"
+    );
+
+    let report = s.load(modes::DEFAULT_MODE, true).unwrap();
+    assert_eq!(report.forced, ["mods/b-1.0.0.jar"]);
+    assert_eq!(report.copied, ["mods/b-1.0.0.jar"]);
+    assert!(jar.is_file());
+    assert!(!disabled.exists());
+    assert!(s.load(modes::DEFAULT_MODE, false).is_ok());
+
+    // Disabled, then forced into a mode without it: the disabled copy goes too.
+    s.load(modes::DEFAULT_MODE, false).unwrap();
+    let a = s.instance().join("mods/a-1.0.0.jar");
+    fs::rename(&a, s.instance().join("mods/a-1.0.0.jar.disabled")).unwrap();
+    s.load("server", true).unwrap();
+    assert!(!a.exists());
+    assert!(!s.instance().join("mods/a-1.0.0.jar.disabled").exists());
+}
+
+#[test]
 fn a_foreign_file_where_a_jar_goes_blocks_without_force() {
     let s = Setup::new();
     write(&s.instance(), "mods/a-1.0.0.jar", "someone else's a");
@@ -351,6 +401,32 @@ fn running_minecraft_is_refused_and_nothing_is_written() {
     assert!(err.to_string().contains("Minecraft is running"));
     assert!(s.jars().is_empty());
     assert!(!s.instance().join(instance::STATE_FILE).exists());
+}
+
+#[test]
+fn a_config_file_the_cli_did_not_write_blocks_unless_it_matches() {
+    let s = Setup::new();
+    // Created by the game before any load: same content is adopted silently.
+    write(&s.instance(), "config/sub/b.toml", "base b");
+    write(&s.instance(), "config/a.toml", "the game's own a");
+
+    let err = s.load(modes::DEFAULT_MODE, false).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Blocked);
+    let text = err.to_string();
+    assert!(
+        text.contains("1 config file(s) of the instance that modpack-cli did not write")
+            && text.contains("\n  - config/a.toml"),
+        "{text}"
+    );
+    assert!(err.hint().contains("--force"));
+    assert_eq!(s.read("config/a.toml"), "the game's own a");
+    assert!(s.jars().is_empty());
+
+    let report = s.load(modes::DEFAULT_MODE, true).unwrap();
+    assert_eq!(report.forced, ["config/a.toml"]);
+    assert_eq!(s.read("config/a.toml"), "base a");
+    assert!(s.state().files.contains_key("config/sub/b.toml"));
+    assert!(s.load(modes::DEFAULT_MODE, false).is_ok());
 }
 
 #[test]

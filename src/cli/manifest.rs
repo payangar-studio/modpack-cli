@@ -1,11 +1,16 @@
-//! `modpack manifest`: adds the new jars of mods/ to the manifest and
-//! rebuilds the entries whose jar changed. A missing jar keeps its entry.
+//! `modpack manifest`: adds the new jars of mods/ to the manifest, rebuilds
+//! the entries whose jar changed and links entries to the platforms that did
+//! not know them yet. A missing jar keeps its entry.
+//! Then checks `modes.toml` against the manifest, so that the `pre-commit`
+//! hook, which runs this command, stops a commit whose modes are broken.
 
 use std::io::Write;
+use std::path::Path;
 
 use crate::context::Context;
 use crate::error::{Error, Result};
-use crate::model::manifest::FILE_NAME;
+use crate::model::manifest::{FILE_NAME, Manifest};
+use crate::model::modes::{self, Modes};
 use crate::ops::manifest::{check, regenerate};
 use crate::platform::Registry;
 
@@ -21,6 +26,21 @@ pub struct Args {
 
 pub fn run(args: Args, ctx: &Context) -> Result<()> {
     let root = ctx.require_root()?;
+    update_or_check(args, root)?;
+    check_modes(root)
+}
+
+/// `modes.toml` parses and names only keys of the manifest. A repository
+/// without `modes.toml` has nothing to check.
+fn check_modes(root: &Path) -> Result<()> {
+    let path = root.join(modes::FILE_NAME);
+    if !path.is_file() {
+        return Ok(());
+    }
+    Modes::load(&path)?.check(&Manifest::load(&root.join(FILE_NAME))?)
+}
+
+fn update_or_check(args: Args, root: &Path) -> Result<()> {
     let out = &mut std::io::stdout().lock();
     if args.check {
         let gaps = check(root)?;
@@ -58,6 +78,7 @@ pub fn run(args: Args, ctx: &Context) -> Result<()> {
     for (label, keys) in [
         ("added", &changes.added),
         ("rebuilt, jar changed", &changes.rebuilt),
+        ("linked to more platforms", &changes.linked),
     ] {
         if !keys.is_empty() {
             writeln!(out, "{label}: {}", keys.join(", "))?;

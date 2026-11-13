@@ -23,7 +23,11 @@ fn repo() -> tempfile::TempDir {
 
 fn modpack(dir: &Path) -> Command {
     let mut cmd = Command::cargo_bin("modpack").unwrap();
-    cmd.current_dir(dir).env_remove("RUST_LOG");
+    // A key, so that CurseForge reads neither the keyring nor blames a
+    // missing key for the fixture's mods that are not on CurseForge.
+    cmd.current_dir(dir)
+        .env_remove("RUST_LOG")
+        .env("MODPACK_CURSEFORGE_API_KEY", "test-key");
     cmd
 }
 

@@ -19,9 +19,10 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{Context, Error, Result};
 use crate::launcher::running::GameDetector;
-use crate::model::instance::{self, InstanceState, Instances};
+use crate::model::instance::{self, DISABLED_SUFFIX, InstanceState, Instances, disabled_in_app};
 use crate::model::manifest::{self, Entry, Manifest};
 use crate::model::modes::{self, Modes};
+use crate::model::sha256_file;
 use crate::model::socle::SocleConfig;
 use crate::store::download::{Sources, download_all};
 use crate::store::inventory::inventory;
@@ -61,7 +62,7 @@ pub struct LoadReport {
     pub removed: Vec<String>,
     /// Jars unknown to the manifest, left as they are.
     pub unknown: Vec<String>,
-    /// Config files written into the instance.
+    /// Config files written into the instance: new, or with other content.
     pub written: Vec<String>,
     /// Config files the CLI wrote for another mode, removed from the instance.
     pub config_removed: Vec<String>,
@@ -90,12 +91,25 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
+    let mut disabled = Vec::new();
+    for rel in &drifted {
+        if disabled_in_app(&instance, &state, rel)? {
+            disabled.push(rel.clone());
+        }
+    }
     if !drifted.is_empty() && !force {
+        let described: Vec<String> = drifted
+            .iter()
+            .map(|rel| match disabled.contains(rel) {
+                true => format!("{rel} (disabled in the app)"),
+                false => rel.clone(),
+            })
+            .collect();
         return Err(Error::blocked(
             format!(
                 "{} file(s) of the instance changed since modpack-cli wrote them:{}",
                 drifted.len(),
-                bullets(&drifted)
+                bullets(&described)
             ),
             "bring the changes you want to keep into the repository, then rerun with --force to overwrite them",
         ));
@@ -152,6 +166,27 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
     }
     unknown.retain(|rel| !in_the_way.contains(rel));
 
+    // Nor is a config file of the instance the CLI never wrote, such as one
+    // the game created, when the mode has other content for it.
+    let configs = config_files(root, mode)?;
+    let mut foreign = Vec::new();
+    for (rel, source) in &configs {
+        let dest = instance.join(rel);
+        if !state.files.contains_key(rel) && dest.is_file() && !same_content(source, &dest)? {
+            foreign.push(rel.clone());
+        }
+    }
+    if !foreign.is_empty() && !force {
+        return Err(Error::blocked(
+            format!(
+                "{} config file(s) of the instance that modpack-cli did not write differ from the mode's:{}",
+                foreign.len(),
+                bullets(&foreign)
+            ),
+            "bring the changes you want to keep into the repository, then rerun with --force to overwrite them",
+        ));
+    }
+
     let downloaded = fill_stock(root, &manifest, &wanted, ctx.sources)?;
 
     let mut report = LoadReport {
@@ -159,7 +194,11 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
         instance: instance.clone(),
         downloaded,
         unknown,
-        forced: drifted.into_iter().chain(in_the_way).collect(),
+        forced: drifted
+            .into_iter()
+            .chain(in_the_way)
+            .chain(foreign)
+            .collect(),
         ..Default::default()
     };
     report.forced.sort();
@@ -175,12 +214,20 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
         new_state.record(&instance, &rel)?;
         report.copied.push(rel);
     }
+    // Forced past a jar the app disabled: the repository wins, so the jar is
+    // back (when the mode has it) and its disabled copy goes.
+    for rel in disabled {
+        let path = instance.join(format!("{rel}{DISABLED_SUFFIX}"));
+        fs::remove_file(&path).context(format!("removing {}", path.display()))?;
+    }
 
-    let configs = config_files(root, mode)?;
     for (rel, source) in &configs {
-        copy_file(source, &instance.join(rel))?;
+        let dest = instance.join(rel);
+        if !(dest.is_file() && same_content(source, &dest)?) {
+            copy_file(source, &dest)?;
+            report.written.push(rel.clone());
+        }
         new_state.record(&instance, rel)?;
-        report.written.push(rel.clone());
     }
     // A config file the CLI wrote that this mode does not have, such as the
     // previous mode's override, goes. Changed since, it is drift: past the
@@ -330,6 +377,11 @@ fn walk(dir: &Path, prefix: &str, files: &mut BTreeMap<String, PathBuf>) -> Resu
     Ok(())
 }
 
+fn same_content(a: &Path, b: &Path) -> Result<bool> {
+    let hash = |p: &Path| sha256_file(p).context(format!("reading {}", p.display()));
+    Ok(hash(a)? == hash(b)?)
+}
+
 /// Copies through a temporary file then a rename, so that a crash never
 /// leaves a half-written file in the instance.
 fn copy_file(source: &Path, dest: &Path) -> Result<()> {
@@ -365,6 +417,13 @@ impl fmt::Display for LoadReport {
             ),
             ("not in the manifest, left as is", &self.unknown),
         ];
+        // Everything but the jars left as they are.
+        if lines[..lines.len() - 1]
+            .iter()
+            .all(|(_, items)| items.is_empty())
+        {
+            writeln!(f, "nothing changed in the instance")?;
+        }
         for (label, items) in lines {
             if !items.is_empty() {
                 writeln!(f, "{label}: {}", items.join(", "))?;

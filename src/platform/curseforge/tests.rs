@@ -219,6 +219,27 @@ fn resolves_a_slug_to_compatible_files_newest_first() {
 }
 
 #[test]
+fn project_name_gives_slug_and_title() {
+    let mut server = Server::new();
+    server
+        .mock("GET", "/v1/mods/238222")
+        .with_body(
+            json!({ "data": { "id": 238222, "slug": "jei", "name": "Just Enough Items" } })
+                .to_string(),
+        )
+        .create();
+    let platform = with_key(&server);
+    assert_eq!(
+        platform.project_name("238222").unwrap(),
+        Some(ProjectName {
+            slug: "jei".into(),
+            title: "Just Enough Items".into()
+        })
+    );
+    assert_eq!(platform.project_name("not-a-number").unwrap(), None);
+}
+
+#[test]
 fn resolves_an_id_and_a_url_naming_a_file() {
     let mut server = Server::new();
     server
@@ -375,15 +396,32 @@ fn a_vanished_file_is_reported() {
     assert!(err.to_string().contains("no longer exists"));
 }
 
-#[test]
-fn a_mod_not_on_curseforge_blocks_the_pack() {
-    let cf = CurseForge::with("http://unused.invalid", || None);
+fn refusal(cf: &CurseForge) -> String {
     let mut e = entry(1, 2);
     e.platforms.clear();
     let Eligibility::Blocked { reason } = cf.pack_eligibility(&e).unwrap() else {
         panic!("a mod off CurseForge is not eligible");
     };
+    reason
+}
+
+#[test]
+fn a_mod_not_on_curseforge_blocks_the_pack() {
+    let reason = refusal(&CurseForge::with("http://unused.invalid", || {
+        Some(KEY.into())
+    }));
+    assert!(reason.starts_with("not hosted on CurseForge"), "{reason}");
     assert!(reason.contains("approved list"));
+}
+
+#[test]
+fn without_a_key_missing_ids_blame_the_key_not_the_hosting() {
+    let reason = refusal(&CurseForge::with("http://unused.invalid", || None));
+    assert!(!reason.contains("not hosted"), "{reason}");
+    assert!(reason.contains("no CurseForge Core API key"), "{reason}");
+    assert!(reason.contains("`modpack auth`"), "{reason}");
+    assert!(reason.contains("MODPACK_CURSEFORGE_API_KEY"), "{reason}");
+    assert!(reason.contains("`modpack manifest`"), "{reason}");
 }
 
 #[test]

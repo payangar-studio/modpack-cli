@@ -107,6 +107,13 @@ pub struct Candidate {
     pub section: toml::Table,
 }
 
+/// How a project shows to people: its slug and its title.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ProjectName {
+    pub slug: String,
+    pub title: String,
+}
+
 /// Where to get a jar from.
 pub enum Download {
     Url(String),
@@ -179,6 +186,14 @@ pub trait Platform: Send + Sync {
     fn resolve(&self, query: &str, pack: &Pack) -> Result<Vec<Candidate>> {
         let _ = (query, pack);
         Err(unsupported(self.name(), Operation::Resolve))
+    }
+
+    /// Slug and title of the project with the id `id`, to name it to people
+    /// rather than by its id. `None` when the platform does not know it or
+    /// cannot say.
+    fn project_name(&self, id: &str) -> Result<Option<ProjectName>> {
+        let _ = id;
+        Ok(None)
     }
 
     /// Completes an entry from its table for this platform: download URLs,

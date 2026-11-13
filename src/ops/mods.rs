@@ -14,9 +14,9 @@ use std::path::Path;
 use super::manifest::{Draft, complete, first_line, load_or_new};
 use super::modes_edit;
 use crate::error::{Context, Error, Result};
-use crate::model::manifest::{self, Entry, Env, Hashes, Manifest};
+use crate::model::manifest::{self, Entry, Env, Hashes, Manifest, Pack};
 use crate::model::modes::DEFAULT_MODE;
-use crate::platform::{Candidate, Download, Platform};
+use crate::platform::{Candidate, Download, Platform, ProjectName};
 use crate::prompt::Prompt;
 use crate::store::download::{Sources, download};
 use crate::store::hash::{copy_hashing, hash_file};
@@ -57,7 +57,14 @@ pub fn add(
     let mut manifest = load_or_new(root)?;
 
     let local = Path::new(&req.mod_ref);
-    let key = if local.is_file() {
+    let existing = if req.with_deps && req.version.is_none() && !local.is_file() {
+        in_pack(sources, &manifest, &req.mod_ref)
+    } else {
+        None
+    };
+    let key = if let Some(key) = &existing {
+        key.clone()
+    } else if local.is_file() {
         if req.version.is_some() {
             return Err(Error::usage(
                 "--version only applies to a mod from a platform",
@@ -98,8 +105,18 @@ pub fn add(
         out,
     )?;
     manifest.save(&root.join(manifest::FILE_NAME))?;
+    if existing.is_some() {
+        // The mod was already there: only its dependencies are new.
+        added.remove(0);
+        if added.is_empty() {
+            writeln!(
+                out,
+                "`{key}` is already in the pack, with every required dependency"
+            )?;
+        }
+    }
 
-    if let Some(mode) = mode {
+    if let Some(mode) = mode.filter(|_| !added.is_empty()) {
         modes_edit::edit(root, |doc| {
             added
                 .iter()
@@ -137,6 +154,22 @@ pub fn remove(root: &Path, key: &str, out: &mut dyn Write) -> Result<()> {
         writeln!(out, "removed `{key}` from the modes that listed it")?;
     }
     Ok(())
+}
+
+/// Key of the mod `query` names when the manifest already holds it: by key,
+/// else by project on the platform that resolves it. A failed lookup counts
+/// as not held: adding it then reports the failure.
+fn in_pack(sources: Sources<'_>, manifest: &Manifest, query: &str) -> Option<String> {
+    if manifest.get(query).is_some() {
+        return Some(query.to_owned());
+    }
+    let (platform, candidates) = resolve(sources, None, query, manifest).ok()?;
+    let section = &candidates.first()?.section;
+    manifest
+        .mods
+        .iter()
+        .find(|e| same_project(e.platform(platform.name()), section))
+        .map(|e| e.key.clone())
 }
 
 /// How to pick a version among several.
@@ -227,7 +260,7 @@ fn add_remote(
     out: &mut dyn Write,
 ) -> Result<String> {
     let (platform, candidates) = resolve(sources, on, query, manifest)?;
-    let candidate = choose(candidates, query, choice)?;
+    let candidate = choose(candidates, query, &manifest.pack, choice)?;
     let name = platform.name();
 
     let previous = manifest
@@ -327,7 +360,15 @@ fn resolve<'a>(
     }))
 }
 
-fn choose(mut candidates: Vec<Candidate>, query: &str, choice: Choice<'_>) -> Result<Candidate> {
+/// How many versions an error lists at most.
+const LISTED_VERSIONS: usize = 10;
+
+fn choose(
+    mut candidates: Vec<Candidate>,
+    query: &str,
+    pack: &Pack,
+    choice: Choice<'_>,
+) -> Result<Candidate> {
     if let Some(wanted) = choice.version {
         return candidates
             .iter()
@@ -336,7 +377,7 @@ fn choose(mut candidates: Vec<Candidate>, query: &str, choice: Choice<'_>) -> Re
             .ok_or_else(|| {
                 let labels: Vec<&str> = candidates
                     .iter()
-                    .take(10)
+                    .take(LISTED_VERSIONS)
                     .map(|c| c.label.as_str())
                     .collect();
                 Error::usage(
@@ -349,10 +390,55 @@ fn choose(mut candidates: Vec<Candidate>, query: &str, choice: Choice<'_>) -> Re
         Some(prompt) if candidates.len() > 1 => prompt,
         _ => return Ok(candidates.swap_remove(0)),
     };
+    if !prompt.is_interactive() {
+        return Err(several_versions(&candidates, query, pack));
+    }
     let labels: Vec<String> = candidates.iter().map(|c| c.label.clone()).collect();
     let picked = prompt.select(None, "--version", &format!("Version of {query}"), &labels)?;
     let index = labels.iter().position(|l| *l == picked).unwrap_or(0);
     Ok(candidates.swap_remove(index))
+}
+
+/// Several versions fit and there is no terminal to ask: lists them, in the
+/// platform's order (newest first), and the argument that picks one.
+fn several_versions(candidates: &[Candidate], query: &str, pack: &Pack) -> Error {
+    let mut what = format!(
+        "`{query}` has {} versions for Minecraft {} with {}, and no terminal to ask which one (newest first):",
+        candidates.len(),
+        pack.minecraft,
+        pack.loader
+    );
+    for candidate in candidates.iter().take(LISTED_VERSIONS) {
+        what.push_str(&format!("\n  - {}", version_arg(candidate)));
+    }
+    if candidates.len() > LISTED_VERSIONS {
+        what.push_str(&format!(
+            "\n  - and {} older",
+            candidates.len() - LISTED_VERSIONS
+        ));
+    }
+    Error::usage(
+        what,
+        format!(
+            "pass the version with --version, e.g. `modpack add {query} --version {}`",
+            version_arg(&candidates[0])
+        ),
+    )
+}
+
+/// What to pass to `--version` for a candidate: its label up to a
+/// parenthesis, quoted for the shell when it holds a space.
+fn version_arg(candidate: &Candidate) -> String {
+    let name = candidate
+        .label
+        .split(" (")
+        .next()
+        .unwrap_or(&candidate.label);
+    if name.contains(char::is_whitespace) {
+        format!("'{}'", name.replace('\'', "'\\''"))
+    } else {
+        name.to_owned()
+    }
 }
 
 /// Whether `wanted` names the candidate: its label, the name before a
@@ -417,9 +503,12 @@ fn add_dependencies(
     added: &mut Vec<String>,
     out: &mut dyn Write,
 ) -> Result<()> {
-    let missing = missing_dependencies(manifest, added);
+    let mut missing = missing_dependencies(manifest, added);
     if missing.is_empty() {
         return Ok(());
+    }
+    for dep in &mut missing {
+        dep.name = name_of(sources, dep);
     }
     writeln!(out, "required dependencies missing from the pack:")?;
     for dep in &missing {
@@ -430,7 +519,8 @@ fn add_dependencies(
     if !go {
         writeln!(
             out,
-            "add them with `modpack add <mod> --with-deps`, or one by one with `modpack add`"
+            "add them with `modpack add {} --with-deps`, or one by one with `modpack add`",
+            added[0]
         )?;
         return Ok(());
     }
@@ -466,6 +556,19 @@ fn add_dependencies(
     }
 }
 
+/// Slug and title of a dependency, from its platform. A failed lookup (no
+/// network, no API key) leaves the dependency named by its id.
+fn name_of(sources: Sources<'_>, dep: &MissingDependency) -> Option<ProjectName> {
+    let platform = sources.registry.find(&dep.platform)?;
+    match platform.project_name(&dep.id) {
+        Ok(name) => name,
+        Err(err) => {
+            tracing::debug!(platform = dep.platform, id = dep.id, "{}", first_line(&err));
+            None
+        }
+    }
+}
+
 /// A required dependency no mod of the manifest provides.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MissingDependency {
@@ -474,15 +577,24 @@ pub struct MissingDependency {
     pub id: String,
     /// Key of the mod that needs it.
     pub needed_by: String,
+    /// How the platform names the project, when it was asked.
+    pub name: Option<ProjectName>,
 }
 
 impl std::fmt::Display for MissingDependency {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} project `{}`, needed by `{}`",
-            self.platform, self.id, self.needed_by
-        )
+        match &self.name {
+            Some(name) => write!(
+                f,
+                "`{}` ({}, {} id `{}`), needed by `{}`",
+                name.slug, name.title, self.platform, self.id, self.needed_by
+            ),
+            None => write!(
+                f,
+                "{} project `{}`, needed by `{}`",
+                self.platform, self.id, self.needed_by
+            ),
+        }
     }
 }
 
@@ -511,6 +623,7 @@ pub fn missing_dependencies(manifest: &Manifest, keys: &[String]) -> Vec<Missing
                     platform: platform.clone(),
                     id,
                     needed_by: entry.key.clone(),
+                    name: None,
                 });
             }
         }
@@ -685,17 +798,20 @@ mod tests {
         assert!(!root.path().join(manifest::FILE_NAME).exists());
     }
 
-    fn with_dependency() -> Registry {
+    /// `sodium` needs `fabric-api`, which needs `fabric-loader-lib`.
+    fn dependency_chain() -> FakePlatform {
         let mut sodium = FakeMod::new("sodium");
         sodium.dependencies = vec!["fabric-api".into()];
         let mut fabric = FakeMod::new("fabric-api");
         fabric.dependencies = vec!["fabric-loader-lib".into()];
-        Registry::new(vec![Box::new(
-            FakePlatform::new("fake")
-                .with(sodium)
-                .with(fabric)
-                .with(FakeMod::new("fabric-loader-lib")),
-        )])
+        FakePlatform::new("fake")
+            .with(sodium)
+            .with(fabric)
+            .with(FakeMod::new("fabric-loader-lib"))
+    }
+
+    fn with_dependency() -> Registry {
+        Registry::new(vec![Box::new(dependency_chain())])
     }
 
     #[test]
@@ -705,12 +821,26 @@ mod tests {
         result.unwrap();
         assert!(
             out.contains(
-                "missing from the pack:\n  - fake project `fabric-api`, needed by `sodium`\n"
+                "missing from the pack:\n  - `fabric-api` (Title of fabric-api, fake id `fabric-api`), needed by `sodium`\n"
             ),
             "{out}"
         );
-        assert!(out.contains("--with-deps"), "{out}");
+        assert!(out.contains("`modpack add sodium --with-deps`"), "{out}");
         assert!(load(root.path()).get("fabric-api").is_none());
+    }
+
+    #[test]
+    fn dependency_the_platform_cannot_name_keeps_its_id() {
+        let root = repo();
+        let mut sodium = FakeMod::new("sodium");
+        sodium.dependencies = vec!["eXts2L7r".into()];
+        let registry = Registry::new(vec![Box::new(FakePlatform::new("fake").with(sodium))]);
+        let (result, out) = run_add(root.path(), &registry, &request("sodium"));
+        result.unwrap();
+        assert!(
+            out.contains("  - fake project `eXts2L7r`, needed by `sodium`\n"),
+            "{out}"
+        );
     }
 
     #[test]
@@ -732,6 +862,47 @@ mod tests {
         assert!(
             modes.contains("add = [\"sodium\", \"fabric-api\", \"fabric-loader-lib\"]"),
             "{modes}\n{out}"
+        );
+    }
+
+    #[test]
+    fn with_deps_on_a_mod_in_the_pack_adds_only_its_dependencies() {
+        let root = repo();
+        fs::write(root.path().join("modes.toml"), MODES).unwrap();
+        let registry = Registry::new(vec![Box::new(TwoVersions(dependency_chain()))]);
+        let mut req = request("sodium");
+        req.version = Some("0.9.0".into());
+        run_add(root.path(), &registry, &req).0.unwrap();
+
+        // No --version although two versions fit, and no second "added `sodium`".
+        let mut req = request("sodium");
+        req.with_deps = true;
+        let (result, out) = run_add(root.path(), &registry, &req);
+        assert_eq!(result.unwrap(), "sodium");
+        assert!(!out.contains("added `sodium`"), "{out}");
+        assert!(out.contains("added `fabric-api`"), "{out}");
+        assert!(out.contains("added `fabric-loader-lib`"), "{out}");
+        assert!(root.path().join("mods/sodium-1.0.0.jar").is_file());
+
+        let (result, out) = run_add(root.path(), &registry, &req);
+        result.unwrap();
+        assert_eq!(
+            out,
+            "`sodium` is already in the pack, with every required dependency\n"
+        );
+
+        // Found by its project when the key is not the slug.
+        let path = root.path().join(manifest::FILE_NAME);
+        let mut manifest = load(root.path());
+        let mut renamed = manifest.remove("sodium").unwrap();
+        renamed.key = "rubidium".into();
+        manifest.upsert(renamed);
+        manifest.save(&path).unwrap();
+        let (result, out) = run_add(root.path(), &registry, &req);
+        assert_eq!(result.unwrap(), "rubidium");
+        assert!(
+            out.starts_with("`rubidium` is already in the pack"),
+            "{out}"
         );
     }
 
@@ -776,7 +947,19 @@ mod tests {
             .0
             .unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Usage);
-        assert!(err.to_string().contains("--version"), "{err}");
+        let text = err.to_string();
+        assert!(
+            text.contains("`sodium` has 2 versions for Minecraft 1.21.1 with neoforge"),
+            "{text}"
+        );
+        assert!(
+            text.contains("\n  - sodium-1.0.0.jar\n  - 0.9.0\n"),
+            "{text}"
+        );
+        assert_eq!(
+            err.hint(),
+            "pass the version with --version, e.g. `modpack add sodium --version sodium-1.0.0.jar`"
+        );
 
         let mut req = request("sodium");
         req.version = Some("0.9.0".into());
@@ -790,6 +973,21 @@ mod tests {
             err.hint().contains("sodium-1.0.0.jar, 0.9.0"),
             "{}",
             err.hint()
+        );
+    }
+
+    #[test]
+    fn version_argument_drops_the_details_and_quotes_spaces() {
+        let candidate = |label: &str| Candidate {
+            label: label.into(),
+            slug: None,
+            file_name: "a.jar".into(),
+            section: toml::Table::new(),
+        };
+        assert_eq!(version_arg(&candidate("0.6.0+mc1.21.1")), "0.6.0+mc1.21.1");
+        assert_eq!(
+            version_arg(&candidate("Jade 15.1 (release, 2024-08-01)")),
+            "'Jade 15.1'"
         );
     }
 

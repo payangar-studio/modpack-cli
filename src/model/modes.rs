@@ -232,17 +232,23 @@ impl Modes {
         problems
     }
 
+    /// Fails with every inconsistency with the manifest, listed.
+    pub fn check(&self, manifest: &Manifest) -> Result<()> {
+        let problems = self.validate(manifest);
+        if problems.is_empty() {
+            return Ok(());
+        }
+        let list: Vec<String> = problems.iter().map(|p| format!("\n  - {p}")).collect();
+        Err(invalid(format!(
+            "inconsistent with mods.lock.toml:{}",
+            list.concat()
+        )))
+    }
+
     /// The mods and conditions of a mode. Fails on an unknown mode, or when
     /// the modes are inconsistent with the manifest.
     pub fn resolve(&self, mode: &str, manifest: &Manifest) -> Result<Resolved> {
-        let problems = self.validate(manifest);
-        if !problems.is_empty() {
-            let list: Vec<String> = problems.iter().map(|p| format!("\n  - {p}")).collect();
-            return Err(invalid(format!(
-                "modes.toml does not match mods.lock.toml:{}",
-                list.concat()
-            )));
-        }
+        self.check(manifest)?;
         let mut selection = self.default_selection(manifest);
         let own_conditions = if mode == DEFAULT_MODE {
             &self.default.conditions
@@ -491,8 +497,11 @@ mod tests {
                 },
             ]
         );
-        let err = modes.resolve("a", &manifest()).unwrap_err();
-        assert!(err.to_string().contains("`ghost`"));
+        let err = modes.resolve("a", &manifest()).unwrap_err().to_string();
+        assert!(err.contains("`ghost`"));
+        assert!(err.starts_with("error: modes.toml: inconsistent with mods.lock.toml:"));
+        let first_line = err.lines().next().unwrap();
+        assert_eq!(first_line.matches("modes.toml").count(), 1, "{err}");
     }
 
     #[test]
@@ -558,6 +567,25 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn reference_doc_example_is_valid_and_names_every_condition() {
+        let doc = include_str!("../../docs/modes.md");
+        let example = doc
+            .split("```toml\n")
+            .nth(1)
+            .and_then(|rest| rest.split("\n```").next())
+            .unwrap();
+        let modes = Modes::parse(example).unwrap();
+        assert_eq!(modes.validate(&manifest()), Vec::new());
+        assert_eq!(modes.names(), ["default", "hardcore", "server"]);
+        for name in crate::conditions::NAMES {
+            assert!(
+                doc.contains(&format!("| `{name}` |")),
+                "{name} undocumented"
+            );
+        }
     }
 
     #[test]

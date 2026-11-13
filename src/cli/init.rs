@@ -70,7 +70,8 @@ pub fn run(args: Args, ctx: &Context) -> Result<()> {
         },
     )?;
 
-    println!("Created modpack `{name}` in {}.", dir.display());
+    // No final period: the directory is often `.`, and `in ..` reads as the parent.
+    println!("Created modpack `{name}` in {}", dir.display());
     println!("Review the files, commit them, then run `modpack setup` to prepare this machine.");
     Ok(())
 }

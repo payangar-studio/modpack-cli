@@ -163,6 +163,9 @@ pub struct Changes {
     pub missing: Vec<String>,
     /// Keys of the entries whose jar changed, rebuilt under the same key.
     pub rebuilt: Vec<String>,
+    /// Keys of the entries a platform without a table for them now knows,
+    /// such as CurseForge once a Core API key is set.
+    pub linked: Vec<String>,
     /// Keys of the new or rebuilt entries no platform knows.
     pub unidentified: Vec<String>,
     pub warnings: Vec<String>,
@@ -170,13 +173,14 @@ pub struct Changes {
 
 impl Changes {
     pub fn is_empty(&self) -> bool {
-        self.added.is_empty() && self.rebuilt.is_empty()
+        self.added.is_empty() && self.rebuilt.is_empty() && self.linked.is_empty()
     }
 }
 
 /// Rewrites the manifest from `mods/`: new jars are identified and added,
 /// entries whose jar changed are rebuilt under the same key, entries whose jar
-/// is missing are kept and reported. Writes the file only when something
+/// is missing are kept and reported, and the platforms an entry has no table
+/// for are asked again. Writes the file only when something
 /// changed, or when it did not exist.
 pub fn regenerate(root: &Path, registry: &Registry) -> Result<Changes> {
     let path = root.join(manifest::FILE_NAME);
@@ -214,10 +218,45 @@ pub fn regenerate(root: &Path, registry: &Registry) -> Result<Changes> {
             changes.added.push(key);
         }
     }
+    changes.linked = link(root, &mut manifest, &inv.present, registry);
     if !existed || !changes.is_empty() {
         manifest.save(&path)?;
     }
     Ok(changes)
+}
+
+/// Asks each platform about the unchanged entries it has no table for, when
+/// another platform knows them: it may not have been asked when they were
+/// added (no CurseForge key, no network). Entries no platform knows were
+/// reported as such and are not asked again. Most of these mods are simply
+/// not on that platform, so a failure or a partial match stays silent.
+/// Returns the keys of the entries completed.
+fn link(root: &Path, manifest: &mut Manifest, keys: &[String], registry: &Registry) -> Vec<String> {
+    let mut drafts: Vec<Draft> = keys
+        .iter()
+        .filter_map(|k| manifest.get(k))
+        .filter(|e| {
+            !e.platforms.is_empty() && registry.all().any(|p| e.platform(p.name()).is_none())
+        })
+        .map(|e| Draft {
+            entry: e.clone(),
+            key: Some(e.key.clone()),
+            slugs: BTreeMap::new(),
+        })
+        .collect();
+    if drafts.is_empty() {
+        return Vec::new();
+    }
+    let before: Vec<usize> = drafts.iter().map(|d| d.entry.platforms.len()).collect();
+    for warning in complete(root, &mut drafts, registry) {
+        tracing::debug!("{warning}");
+    }
+    drafts
+        .into_iter()
+        .zip(before)
+        .filter(|(draft, before)| draft.entry.platforms.len() > *before)
+        .map(|(draft, _)| draft.commit(manifest, registry))
+        .collect()
 }
 
 /// Differences between the manifest and `mods/` that `regenerate` would
@@ -421,6 +460,54 @@ pub(crate) mod tests {
         fs::write(&path, fs::read_to_string(&path).unwrap() + "\n# kept\n").unwrap();
         assert!(regenerate(root.path(), &registry).unwrap().is_empty());
         assert!(fs::read_to_string(&path).unwrap().ends_with("# kept\n"));
+    }
+
+    #[test]
+    fn entry_a_platform_did_not_know_is_linked_once_it_does() {
+        let root = repo();
+        put(root.path(), "jei-1.0.0.jar", b"jei");
+        put(root.path(), "custom.jar", b"???");
+        let only_fake = Registry::new(vec![Box::new(
+            FakePlatform::new("fake").with(FakeMod::new("jei")),
+        )]);
+        regenerate(root.path(), &only_fake).unwrap();
+        assert!(
+            load(root.path())
+                .get("jei")
+                .unwrap()
+                .platform("other")
+                .is_none()
+        );
+
+        // `other` answers now, as CurseForge does once a key is set.
+        let changes = regenerate(root.path(), &registry()).unwrap();
+        assert_eq!(changes.linked, ["jei"]);
+        assert!(changes.warnings.is_empty());
+        let jei = load(root.path()).get("jei").unwrap().clone();
+        assert_eq!(
+            jei.platform("other").unwrap()["id"].as_str(),
+            Some("just-enough-items")
+        );
+        assert_eq!(jei.platform("fake").unwrap()["id"].as_str(), Some("jei"));
+
+        let path = root.path().join(manifest::FILE_NAME);
+        let before = fs::read_to_string(&path).unwrap();
+        assert!(regenerate(root.path(), &registry()).unwrap().is_empty());
+        assert_eq!(fs::read_to_string(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn linking_against_a_failing_platform_is_silent() {
+        let root = repo();
+        put(root.path(), "sodium-1.0.0.jar", b"sodium");
+        let fake = || -> Box<dyn crate::platform::Platform> {
+            Box::new(FakePlatform::new("fake").with(FakeMod::new("sodium")))
+        };
+        regenerate(root.path(), &Registry::new(vec![fake()])).unwrap();
+        let changes =
+            regenerate(root.path(), &Registry::new(vec![Box::new(Offline), fake()])).unwrap();
+        assert!(changes.is_empty());
+        assert!(changes.warnings.is_empty());
     }
 
     #[test]

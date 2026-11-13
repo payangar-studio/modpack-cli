@@ -11,7 +11,7 @@ use std::path::Path;
 use serde::Serialize;
 
 use crate::error::Result;
-use crate::model::instance::{InstanceState, Instances, drift};
+use crate::model::instance::{InstanceState, Instances, disabled_in_app, drift};
 use crate::model::manifest::{self, Manifest};
 use crate::model::socle::{SocleConfig, VersionCheck, cli_version, compare_versions};
 use crate::store::inventory::inventory;
@@ -53,6 +53,8 @@ pub struct Instance {
     pub mode: Option<String>,
     /// Files the CLI wrote, changed or gone since, relative to the instance.
     pub drift: Vec<String>,
+    /// Jars of `drift` the Modrinth App disabled (renamed `<jar>.disabled`).
+    pub disabled: Vec<String>,
     /// Jars of the instance's `mods/` whose hashes no manifest entry has.
     pub unknown_jars: Vec<UnknownJar>,
 }
@@ -130,10 +132,16 @@ pub fn status(root: &Path, instances_file: &Path) -> Result<Status> {
 
 fn instance(dir: &Path, manifest: &Manifest) -> Result<Instance> {
     let state = InstanceState::load(dir)?;
-    let drift = drift(dir, &state)?
+    let drift: Vec<String> = drift(dir, &state)?
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
+    let mut disabled = Vec::new();
+    for rel in &drift {
+        if disabled_in_app(dir, &state, rel)? {
+            disabled.push(rel.clone());
+        }
+    }
     let mut unknown_jars = Vec::new();
     for (relative, hashes) in jars_in(&dir.join(MODS_DIR))? {
         if !manifest.mods.iter().any(|e| hashes.matches(&e.hashes)) {
@@ -148,6 +156,7 @@ fn instance(dir: &Path, manifest: &Manifest) -> Result<Instance> {
         path: dir.to_string_lossy().into_owned(),
         mode: state.mode,
         drift,
+        disabled,
         unknown_jars,
     })
 }
@@ -176,10 +185,18 @@ impl Status {
                     Some(mode) => writeln!(out, "mode: {mode}")?,
                     None => writeln!(out, "mode: none loaded; run `modpack mode load <mode>`")?,
                 }
+                let drift: Vec<String> = i
+                    .drift
+                    .iter()
+                    .map(|rel| match i.disabled.contains(rel) {
+                        true => format!("{rel} (disabled in the app)"),
+                        false => rel.clone(),
+                    })
+                    .collect();
                 list(
                     out,
                     "drift, files changed in the instance since the CLI wrote them",
-                    &i.drift,
+                    &drift,
                 )?;
                 if !i.unknown_jars.is_empty() {
                     writeln!(
@@ -376,6 +393,23 @@ mod tests {
             ["config/jei.toml", "mods/iris-1.0.0.jar"]
         );
         assert!(text(&status).contains("drift, files changed in the instance"));
+    }
+
+    #[test]
+    fn a_jar_disabled_in_the_app_is_drift_said_so() {
+        let setup = Setup::new();
+        let jar = setup.instance().join("mods/iris-1.0.0.jar");
+        fs::rename(&jar, jar.with_extension("jar.disabled")).unwrap();
+        let status = setup.status();
+        let instance = status.instance.as_ref().unwrap();
+        assert_eq!(instance.drift, ["mods/iris-1.0.0.jar"]);
+        assert_eq!(instance.disabled, ["mods/iris-1.0.0.jar"]);
+        assert!(instance.unknown_jars.is_empty());
+        let out = text(&status);
+        assert!(
+            out.contains("  - mods/iris-1.0.0.jar (disabled in the app)"),
+            "{out}"
+        );
     }
 
     #[test]

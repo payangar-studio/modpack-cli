@@ -42,6 +42,37 @@ fn repo() -> tempfile::TempDir {
 }
 
 #[test]
+fn manifest_stops_on_modes_that_do_not_match_it() {
+    let repo = repo();
+    let home = tempfile::tempdir().unwrap();
+    fs::write(
+        repo.path().join("modes.toml"),
+        "[modes.extra]\nadd = [\"ghost\"]\n",
+    )
+    .unwrap();
+    for args in [&["manifest"][..], &["manifest", "--check"][..]] {
+        modpack(repo.path(), home.path())
+            .args(args)
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains(
+                "modes.toml: inconsistent with mods.lock.toml:\n  - mode `extra` names `ghost`",
+            ));
+    }
+
+    fs::write(
+        repo.path().join("modes.toml"),
+        "[conditions]\nfast = true\n",
+    )
+    .unwrap();
+    modpack(repo.path(), home.path())
+        .arg("manifest")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("unknown condition `fast`"));
+}
+
+#[test]
 fn manifest_check_passes_when_up_to_date_and_fails_on_a_jar_added_by_hand() {
     let repo = repo();
     let home = tempfile::tempdir().unwrap();

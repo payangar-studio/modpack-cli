@@ -20,8 +20,8 @@ const COMMANDS: &[&[&str]] = &[
     &["remove", "sodium"],
     &["manifest"],
     &["install"],
-    &["mode", "list"],
-    &["mode", "load", "server"],
+    &["variant", "list"],
+    &["variant", "load", "server"],
     &["status"],
     &["test"],
     &["pack"],
@@ -48,7 +48,7 @@ fn help_lists_every_command() {
             words[0]
         );
     }
-    for group in ["mode", "page"] {
+    for group in ["variant", "page"] {
         let sub = modpack().args([group, "--help"]).assert().success();
         let sub = String::from_utf8(sub.get_output().stdout.clone()).unwrap();
         for words in COMMANDS.iter().filter(|w| w[0] == group) {
@@ -77,13 +77,13 @@ fn command_help_shows_its_arguments() {
         ),
         (&["setup"], &["--no-launch"]),
         (&["update"], &["--force"]),
-        (&["add"], &["<MOD>", "--version", "--mode"]),
+        (&["add"], &["<MOD>", "--version", "--variant"]),
         (&["remove"], &["<KEY>"]),
         (&["manifest"], &["--check"]),
         (&["install"], &["--force"]),
-        (&["mode", "load"], &["<MODE>", "--force"]),
-        (&["test"], &["[MODE]", "--condition"]),
-        (&["pack"], &["[MODE]", "--platform", "--out"]),
+        (&["variant", "load"], &["<VARIANT>", "--force"]),
+        (&["test"], &["[VARIANT]", "--condition"]),
+        (&["pack"], &["[VARIANT]", "--platform", "--out"]),
         (&["page", "push"], &["--platform"]),
     ];
     for (words, expected) in cases {
@@ -104,8 +104,8 @@ fn command_help_shows_its_arguments() {
 fn every_command_is_not_implemented_yet() {
     // init and update are tested in tests/socle_cli.rs.
     const IMPLEMENTED: &[&str] = &[
-        "add", "init", "install", "manifest", "mode", "pack", "page", "remove", "setup", "status",
-        "test", "update",
+        "add", "init", "install", "manifest", "variant", "pack", "page", "remove", "setup",
+        "status", "test", "update",
     ];
     for words in COMMANDS.iter().filter(|w| !IMPLEMENTED.contains(&w[0])) {
         modpack()

@@ -4,23 +4,23 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::Status;
 use crate::model::manifest::{Manifest, Support};
-use crate::model::modes::{Resolved, Side};
+use crate::model::variants::{Resolved, Side};
 
 /// Fields a platform table names its project by: `project_id` for Modrinth,
 /// `projectID` for CurseForge, `id` for the test platform. A table's
 /// `dependencies` lists such ids, on the same platform.
 const PROJECT_ID_FIELDS: [&str; 3] = ["project_id", "projectID", "id"];
 
-/// Every mod of the mode accepts `side`, after its `env`.
-pub fn side(side: Side, manifest: &Manifest, mode: &Resolved) -> Status {
+/// Every mod of the variant accepts `side`, after its `env`.
+pub fn side(side: Side, manifest: &Manifest, variant: &Resolved) -> Status {
     let (name, refused): (&str, Vec<&str>) = match side {
         Side::Client => (
             "client",
-            refusing(manifest, mode, |e| e.env.client == Support::Unsupported),
+            refusing(manifest, variant, |e| e.env.client == Support::Unsupported),
         ),
         Side::Server => (
             "server",
-            refusing(manifest, mode, |e| e.env.server == Support::Unsupported),
+            refusing(manifest, variant, |e| e.env.server == Support::Unsupported),
         ),
     };
     if refused.is_empty() {
@@ -35,10 +35,11 @@ pub fn side(side: Side, manifest: &Manifest, mode: &Resolved) -> Status {
 
 fn refusing<'m>(
     manifest: &'m Manifest,
-    mode: &Resolved,
+    variant: &Resolved,
     unsupported: impl Fn(&crate::model::manifest::Entry) -> bool,
 ) -> Vec<&'m str> {
-    mode.keys
+    variant
+        .keys
         .iter()
         .filter_map(|k| manifest.get(k))
         .filter(|e| unsupported(e))
@@ -46,9 +47,9 @@ fn refusing<'m>(
         .collect()
 }
 
-/// The required dependencies every mod of the mode lists in its platform
-/// tables are mods of the mode.
-pub fn deps_complete(manifest: &Manifest, mode: &Resolved) -> Status {
+/// The required dependencies every mod of the variant lists in its platform
+/// tables are mods of the variant.
+pub fn deps_complete(manifest: &Manifest, variant: &Resolved) -> Status {
     // Platform name, then project id, to manifest key.
     let mut projects: BTreeMap<&str, BTreeMap<String, &str>> = BTreeMap::new();
     for entry in &manifest.mods {
@@ -65,19 +66,19 @@ pub fn deps_complete(manifest: &Manifest, mode: &Resolved) -> Status {
         }
     }
 
-    let in_mode: BTreeSet<&str> = mode.keys.iter().map(String::as_str).collect();
+    let in_variant: BTreeSet<&str> = variant.keys.iter().map(String::as_str).collect();
     let mut missing = BTreeSet::new();
-    for entry in mode.keys.iter().filter_map(|k| manifest.get(k)) {
+    for entry in variant.keys.iter().filter_map(|k| manifest.get(k)) {
         for (platform, table) in &entry.platforms {
             let Some(deps) = table.get("dependencies").and_then(toml::Value::as_array) else {
                 continue;
             };
             for id in deps.iter().filter_map(id_text) {
                 match projects.get(platform.as_str()).and_then(|p| p.get(&id)) {
-                    Some(&key) if key == entry.key || in_mode.contains(key) => {}
+                    Some(&key) if key == entry.key || in_variant.contains(key) => {}
                     Some(&key) => {
                         missing.insert(format!(
-                            "`{}` needs `{key}`, which is not in this mode",
+                            "`{}` needs `{key}`, which is not in this variant",
                             entry.key
                         ));
                     }
@@ -110,7 +111,7 @@ fn id_text(value: &toml::Value) -> Option<String> {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use crate::model::modes::{DEFAULT_MODE, Modes};
+    use crate::model::variants::{DEFAULT_VARIANT, Variants};
     use std::path::Path;
 
     fn fixtures() -> std::path::PathBuf {
@@ -121,12 +122,12 @@ pub(super) mod tests {
         Manifest::load(&fixtures().join(crate::model::manifest::FILE_NAME)).unwrap()
     }
 
-    fn fixture_modes() -> Modes {
-        Modes::load(&fixtures().join(crate::model::modes::FILE_NAME)).unwrap()
+    fn fixture_variants() -> Variants {
+        Variants::load(&fixtures().join(crate::model::variants::FILE_NAME)).unwrap()
     }
 
-    fn resolve(modes: &Modes, mode: &str) -> Resolved {
-        modes.resolve(mode, &manifest()).unwrap()
+    fn resolve(variants: &Variants, variant: &str) -> Resolved {
+        variants.resolve(variant, &manifest()).unwrap()
     }
 
     fn failure(status: Status) -> String {
@@ -137,15 +138,17 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn fixture_modes_pass_their_static_conditions() {
-        let modes = fixture_modes();
+    fn fixture_variants_pass_their_static_conditions() {
+        let variants = fixture_variants();
         let manifest = manifest();
-        for name in modes.names() {
-            let mode = resolve(&modes, name);
-            for condition in &mode.conditions {
+        for name in variants.names() {
+            let variant = resolve(&variants, name);
+            for condition in &variant.conditions {
                 let status = match condition {
-                    crate::model::modes::Condition::Side(s) => side(*s, &manifest, &mode),
-                    crate::model::modes::Condition::DepsComplete => deps_complete(&manifest, &mode),
+                    crate::model::variants::Condition::Side(s) => side(*s, &manifest, &variant),
+                    crate::model::variants::Condition::DepsComplete => {
+                        deps_complete(&manifest, &variant)
+                    }
                     _ => continue,
                 };
                 assert_eq!(status, Status::Passed, "{name}: {condition:?}");
@@ -155,28 +158,31 @@ pub(super) mod tests {
 
     #[test]
     fn side_fails_on_the_mods_that_refuse_it() {
-        let mode = resolve(&fixture_modes(), DEFAULT_MODE);
-        let reason = failure(side(Side::Server, &manifest(), &mode));
+        let variant = resolve(&fixture_variants(), DEFAULT_VARIANT);
+        let reason = failure(side(Side::Server, &manifest(), &variant));
         assert!(reason.contains("server side"), "{reason}");
         assert!(reason.ends_with(": iris, sodium"), "{reason}");
-        assert_eq!(side(Side::Client, &manifest(), &mode), Status::Passed);
+        assert_eq!(side(Side::Client, &manifest(), &variant), Status::Passed);
     }
 
     #[test]
-    fn global_deps_complete_fails_in_a_mode_missing_a_dependency() {
+    fn global_deps_complete_fails_in_a_variant_missing_a_dependency() {
         // iris requires the Modrinth project AANobbMI, which is sodium.
-        let modes = Modes::parse(
-            "[conditions]\ndeps-complete = true\n[modes.lowend]\nremove = [\"sodium\"]\n",
+        let variants = Variants::parse(
+            "[conditions]\ndeps-complete = true\n[variants.lowend]\nremove = [\"sodium\"]\n",
         )
         .unwrap();
-        let mode = resolve(&modes, "lowend");
+        let variant = resolve(&variants, "lowend");
         assert_eq!(
-            mode.conditions,
-            [crate::model::modes::Condition::DepsComplete]
+            variant.conditions,
+            [crate::model::variants::Condition::DepsComplete]
         );
-        let reason = failure(deps_complete(&manifest(), &mode));
-        assert_eq!(reason, "`iris` needs `sodium`, which is not in this mode");
-        let default = resolve(&modes, DEFAULT_MODE);
+        let reason = failure(deps_complete(&manifest(), &variant));
+        assert_eq!(
+            reason,
+            "`iris` needs `sodium`, which is not in this variant"
+        );
+        let default = resolve(&variants, DEFAULT_VARIANT);
         assert_eq!(deps_complete(&manifest(), &default), Status::Passed);
     }
 
@@ -188,12 +194,12 @@ pub(super) mod tests {
             "dependencies".into(),
             toml::Value::Array(vec![306612.into()]),
         );
-        let mode = Resolved {
+        let variant = Resolved {
             name: "m".into(),
             keys: vec!["jei".into()],
             conditions: Vec::new(),
         };
-        let reason = failure(deps_complete(&manifest, &mode));
+        let reason = failure(deps_complete(&manifest, &variant));
         assert_eq!(
             reason,
             "`jei` needs the curseforge project `306612`, which no mod of mods.lock.toml is"
@@ -212,16 +218,16 @@ pub(super) mod tests {
                 "dependencies".into(),
                 toml::Value::Array(vec![238222.into()]),
             );
-        let mut mode = Resolved {
+        let mut variant = Resolved {
             name: "m".into(),
             keys: vec!["ferritecore".into(), "jei".into()],
             conditions: Vec::new(),
         };
-        assert_eq!(deps_complete(&manifest, &mode), Status::Passed);
-        mode.keys.pop();
+        assert_eq!(deps_complete(&manifest, &variant), Status::Passed);
+        variant.keys.pop();
         assert_eq!(
-            failure(deps_complete(&manifest, &mode)),
-            "`ferritecore` needs `jei`, which is not in this mode"
+            failure(deps_complete(&manifest, &variant)),
+            "`ferritecore` needs `jei`, which is not in this variant"
         );
     }
 }

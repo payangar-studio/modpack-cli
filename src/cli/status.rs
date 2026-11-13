@@ -1,4 +1,4 @@
-//! `modpack status`: socle version, the pack's instance, loaded mode, drift,
+//! `modpack status`: socle version, the pack's instance, loaded variant, drift,
 //! unknown jars, and how mods/ compares to the manifest. Writes nothing.
 
 use std::io::Write;

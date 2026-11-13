@@ -99,7 +99,7 @@ pub struct Machine<'a> {
 /// user's click creates, and records it in the machine's `instances.toml`.
 ///
 /// The pack holds no mod and no config, only Minecraft and the loader: the
-/// default mode loaded right after fills the instance, so the app's import
+/// default variant loaded right after fills the instance, so the app's import
 /// never races the CLI over `mods/`, and a mod a `.mrpack` cannot download
 /// never blocks the registration.
 pub fn register_instance(

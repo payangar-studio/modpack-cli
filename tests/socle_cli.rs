@@ -70,7 +70,7 @@ fn init_creates_a_complete_repository() {
         ".modpack/socle.lock",
         ".modpack/README.md",
         "mods.lock.toml",
-        "modes.toml",
+        "variants.toml",
         "AGENTS.md",
         ".gitignore",
         "CLAUDE.md",
@@ -277,12 +277,12 @@ fn update_removes_a_file_that_left_the_templates() {
 fn update_never_touches_the_pack_skeleton() {
     let (_tmp, root) = init_repo();
     make_older(&root);
-    fs::write(root.join("modes.toml"), "# mine\n").unwrap();
+    fs::write(root.join("variants.toml"), "# mine\n").unwrap();
     fs::remove_file(root.join("mods/.gitkeep")).unwrap();
     let manifest = read(&root, "mods.lock.toml");
 
     modpack(&root).arg("update").assert().success();
-    assert_eq!(read(&root, "modes.toml"), "# mine\n");
+    assert_eq!(read(&root, "variants.toml"), "# mine\n");
     assert!(!root.join("mods/.gitkeep").exists());
     assert_eq!(read(&root, "mods.lock.toml"), manifest);
 }

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Managed by modpack-cli; `modpack update` rewrites this file.
-# After a merge or a pull: downloads the missing jars and reloads the mode
+# After a merge or a pull: downloads the missing jars and reloads the variant
 # loaded in the pack's instance. The merge is done and stays done: when the
 # CLI stops (a file of the instance changed, for instance), its message says
 # why and the instance is left as it is.

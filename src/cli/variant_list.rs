@@ -1,13 +1,13 @@
-//! `modpack mode list`: lists the modes and shows the loaded one.
+//! `modpack variant list`: lists the variants and shows the loaded one.
 
 use std::io::Write;
 use std::path::Path;
 
 use crate::context::Context;
 use crate::error::Result;
-use crate::mode;
 use crate::model::instance::Instances;
-use crate::model::modes::DEFAULT_MODE;
+use crate::model::variants::DEFAULT_VARIANT;
+use crate::variant;
 
 #[derive(Debug, clap::Args)]
 pub struct Args {}
@@ -21,17 +21,17 @@ pub fn run(_args: Args, ctx: &Context) -> Result<()> {
     )
 }
 
-/// One line per mode, the default one first: `*` marks the mode loaded in
+/// One line per variant, the default one first: `*` marks the variant loaded in
 /// the pack's instance on this machine.
 fn list(root: &Path, instances_file: &Path, out: &mut dyn Write) -> Result<()> {
-    let modes = mode::load_modes(root)?;
-    let loaded = mode::loaded_mode(root, instances_file)?;
-    let width = modes.names().iter().map(|n| n.len()).max().unwrap_or(0);
-    for name in modes.names() {
-        let description = if name == DEFAULT_MODE {
-            modes.default.description.as_deref()
+    let variants = variant::load_variants(root)?;
+    let loaded = variant::loaded_variant(root, instances_file)?;
+    let width = variants.names().iter().map(|n| n.len()).max().unwrap_or(0);
+    for name in variants.names() {
+        let description = if name == DEFAULT_VARIANT {
+            variants.default.description.as_deref()
         } else {
-            modes.modes[name].description.as_deref()
+            variants.variants[name].description.as_deref()
         };
         let mark = if loaded.as_deref() == Some(name) {
             '*'
@@ -58,7 +58,7 @@ mod tests {
     }
 
     #[test]
-    fn lists_the_modes_and_marks_the_loaded_one() {
+    fn lists_the_variants_and_marks_the_loaded_one() {
         let root = tempfile::tempdir().unwrap();
         let machine = tempfile::tempdir().unwrap();
         SocleConfig {
@@ -74,8 +74,8 @@ mod tests {
         .save(root.path())
         .unwrap();
         fs::write(
-            root.path().join("modes.toml"),
-            "[default]\ndescription = \"Full pack\"\n[modes.server]\ndescription = \"Dedicated server\"\n[modes.lowend]\n",
+            root.path().join("variants.toml"),
+            "[default]\ndescription = \"Full pack\"\n[variants.server]\ndescription = \"Dedicated server\"\n[variants.lowend]\n",
         )
         .unwrap();
         let instances_file = machine.path().join("instances.toml");
@@ -91,7 +91,7 @@ mod tests {
         instances.set("P", instance.clone());
         instances.save(&instances_file).unwrap();
         InstanceState {
-            mode: Some("server".into()),
+            variant: Some("server".into()),
             ..Default::default()
         }
         .save(&instance)

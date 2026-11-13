@@ -1,6 +1,6 @@
-//! `modpack test`: checks the conditions of a mode, or of all modes.
+//! `modpack test`: checks the conditions of a variant, or of all variants.
 //!
-//! Each mode gets its resolved conditions (global ones, then its own), or only
+//! Each variant gets its resolved conditions (global ones, then its own), or only
 //! the one `--condition` names. Every condition passes, fails or is skipped,
 //! with the reason; the command fails when one condition fails, with the
 //! "blocked" exit code (3), so that a failed condition is never taken for an
@@ -15,7 +15,7 @@ use crate::conditions::{self, Checker, Status, server::Machine};
 use crate::context::Context;
 use crate::error::{Error, Result};
 use crate::model::manifest::{self, Manifest};
-use crate::model::modes::{self, Modes};
+use crate::model::variants::{self, Variants};
 use crate::store::download::Http;
 
 #[derive(Debug, clap::Args)]
@@ -23,8 +23,8 @@ use crate::store::download::Http;
     after_help = "Exit codes: 0 when no condition failed (skipped ones do not count), 3 when at least one failed, 2 on a usage error, 1 on an internal error."
 )]
 pub struct Args {
-    /// Mode to check; all modes when omitted
-    pub mode: Option<String>,
+    /// Variant to check; all variants when omitted
+    pub variant: Option<String>,
     /// Check only this condition
     #[arg(long)]
     pub condition: Option<String>,
@@ -40,8 +40,8 @@ pub fn run(args: Args, ctx: &Context) -> Result<()> {
     test(root, &args, &machine, &mut std::io::stdout().lock())
 }
 
-/// One mode and what its conditions gave.
-struct ModeReport {
+/// One variant and what its conditions gave.
+struct VariantReport {
     name: String,
     results: Vec<(String, String, Status)>,
 }
@@ -57,25 +57,25 @@ fn test(root: &Path, args: &Args, machine: &Machine<'_>, out: &mut dyn Write) ->
         ));
     }
     let manifest = load_manifest(root)?;
-    let modes_path = root.join(modes::FILE_NAME);
-    if !modes_path.is_file() {
+    let variants_path = root.join(variants::FILE_NAME);
+    if !variants_path.is_file() {
         return Err(Error::usage(
-            format!("no {} in this repository", modes::FILE_NAME),
+            format!("no {} in this repository", variants::FILE_NAME),
             format!(
                 "create {} at the repository root, with at least a [default] table",
-                modes::FILE_NAME
+                variants::FILE_NAME
             ),
         ));
     }
-    let modes = Modes::load(&modes_path)?;
-    let names: Vec<String> = match &args.mode {
-        Some(mode) => vec![mode.clone()],
-        None => modes.names().into_iter().map(str::to_owned).collect(),
+    let variants = Variants::load(&variants_path)?;
+    let names: Vec<String> = match &args.variant {
+        Some(variant) => vec![variant.clone()],
+        None => variants.names().into_iter().map(str::to_owned).collect(),
     };
-    // Resolve every mode first: a wrong mode name fails before any check.
+    // Resolve every variant first: a wrong variant name fails before any check.
     let resolved = names
         .iter()
-        .map(|name| modes.resolve(name, &manifest))
+        .map(|name| variants.resolve(name, &manifest))
         .collect::<Result<Vec<_>>>()?;
 
     let checker = Checker {
@@ -84,20 +84,20 @@ fn test(root: &Path, args: &Args, machine: &Machine<'_>, out: &mut dyn Write) ->
         machine,
     };
     let mut reports = Vec::new();
-    for mode in &resolved {
+    for variant in &resolved {
         if !args.json {
-            writeln!(out, "{}", mode.name)?;
+            writeln!(out, "{}", variant.name)?;
         }
-        let mut report = ModeReport {
-            name: mode.name.clone(),
+        let mut report = VariantReport {
+            name: variant.name.clone(),
             results: Vec::new(),
         };
-        let selected = mode
+        let selected = variant
             .conditions
             .iter()
             .filter(|c| args.condition.as_deref().is_none_or(|n| c.name() == n));
         for condition in selected {
-            let status = checker.check(condition, mode);
+            let status = checker.check(condition, variant);
             let label = conditions::label(condition);
             if !args.json {
                 write_result(out, &label, &status)?;
@@ -108,7 +108,7 @@ fn test(root: &Path, args: &Args, machine: &Machine<'_>, out: &mut dyn Write) ->
         }
         if !args.json && report.results.is_empty() {
             match &args.condition {
-                Some(name) => writeln!(out, "  no condition `{name}` in this mode")?,
+                Some(name) => writeln!(out, "  no condition `{name}` in this variant")?,
                 None => writeln!(out, "  no conditions")?,
             }
         }
@@ -164,8 +164,8 @@ fn write_result(out: &mut dyn Write, label: &str, status: &Status) -> Result<()>
     Ok(())
 }
 
-fn to_json(reports: &[ModeReport], passed: usize, failed: usize, skipped: usize) -> String {
-    let modes: Vec<_> = reports
+fn to_json(reports: &[VariantReport], passed: usize, failed: usize, skipped: usize) -> String {
+    let variants: Vec<_> = reports
         .iter()
         .map(|r| {
             let conditions: Vec<_> = r
@@ -180,12 +180,12 @@ fn to_json(reports: &[ModeReport], passed: usize, failed: usize, skipped: usize)
                     })
                 })
                 .collect();
-            json!({ "mode": r.name, "conditions": conditions })
+            json!({ "variant": r.name, "conditions": conditions })
         })
         .collect();
     // Pretty, like the JSON of `status` and `pack`.
     serde_json::to_string_pretty(&json!({
-        "modes": modes,
+        "variants": variants,
         "passed": passed,
         "failed": failed,
         "skipped": skipped,
@@ -213,9 +213,9 @@ mod tests {
         }
     }
 
-    fn args(mode: Option<&str>, condition: Option<&str>, json: bool) -> Args {
+    fn args(variant: Option<&str>, condition: Option<&str>, json: bool) -> Args {
         Args {
-            mode: mode.map(str::to_owned),
+            variant: variant.map(str::to_owned),
             condition: condition.map(str::to_owned),
             json,
         }
@@ -227,20 +227,20 @@ mod tests {
         (result, String::from_utf8(out).unwrap())
     }
 
-    /// The fixture repository with another `modes.toml`.
-    fn repo_with_modes(modes: &str) -> tempfile::TempDir {
+    /// The fixture repository with another `variants.toml`.
+    fn repo_with_variants(variants: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         fs::copy(
             fixture().join(manifest::FILE_NAME),
             dir.path().join(manifest::FILE_NAME),
         )
         .unwrap();
-        fs::write(dir.path().join(modes::FILE_NAME), modes).unwrap();
+        fs::write(dir.path().join(variants::FILE_NAME), variants).unwrap();
         dir
     }
 
     #[test]
-    fn static_conditions_of_every_mode_pass_on_the_fixture() {
+    fn static_conditions_of_every_variant_pass_on_the_fixture() {
         let (result, out) = run_on(&fixture(), args(None, Some("deps-complete"), false));
         result.unwrap();
         assert_eq!(
@@ -258,9 +258,9 @@ mod tests {
 
     #[test]
     fn a_failing_global_condition_fails_the_command() {
-        let repo = repo_with_modes(
+        let repo = repo_with_variants(
             "[conditions]\ndeps-complete = true\nclient-starts = true\n\
-             [modes.lowend]\nremove = [\"sodium\"]\n",
+             [variants.lowend]\nremove = [\"sodium\"]\n",
         );
         let (result, out) = run_on(repo.path(), args(Some("lowend"), None, false));
         let err = result.unwrap_err();
@@ -268,7 +268,7 @@ mod tests {
         assert!(err.to_string().contains("1 condition(s) failed"));
         assert!(
             out.contains(
-                "  failed   deps-complete: `iris` needs `sodium`, which is not in this mode\n"
+                "  failed   deps-complete: `iris` needs `sodium`, which is not in this variant\n"
             ),
             "{out}"
         );
@@ -281,7 +281,7 @@ mod tests {
 
     #[test]
     fn json_report_holds_every_result() {
-        let repo = repo_with_modes(
+        let repo = repo_with_variants(
             "[conditions]\ndeps-complete = true\n[default.conditions]\nside = \"server\"\n",
         );
         let (result, out) = run_on(repo.path(), args(None, None, true));
@@ -289,8 +289,8 @@ mod tests {
         let report: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(report["passed"], 1);
         assert_eq!(report["failed"], 1);
-        let conditions = &report["modes"][0]["conditions"];
-        assert_eq!(report["modes"][0]["mode"], "default");
+        let conditions = &report["variants"][0]["conditions"];
+        assert_eq!(report["variants"][0]["variant"], "default");
         assert_eq!(conditions[0]["condition"], "deps-complete");
         assert_eq!(conditions[0]["status"], "passed");
         assert!(conditions[0]["reason"].is_null());
@@ -306,7 +306,7 @@ mod tests {
 
     #[test]
     fn server_starts_on_an_unhandled_loader_is_skipped() {
-        let repo = repo_with_modes("[conditions]\nserver-starts = true\n");
+        let repo = repo_with_variants("[conditions]\nserver-starts = true\n");
         let text = fs::read_to_string(repo.path().join(manifest::FILE_NAME)).unwrap();
         fs::write(
             repo.path().join(manifest::FILE_NAME),
@@ -322,17 +322,17 @@ mod tests {
     }
 
     #[test]
-    fn mode_without_the_asked_condition_says_so() {
+    fn variant_without_the_asked_condition_says_so() {
         let (result, out) = run_on(&fixture(), args(Some("hardcore"), Some("side"), false));
         result.unwrap();
         assert_eq!(
             out,
-            "hardcore\n  no condition `side` in this mode\n0 passed, 0 failed, 0 skipped\n"
+            "hardcore\n  no condition `side` in this variant\n0 passed, 0 failed, 0 skipped\n"
         );
     }
 
     #[test]
-    fn unknown_mode_or_condition_is_a_usage_error() {
+    fn unknown_variant_or_condition_is_a_usage_error() {
         let (result, out) = run_on(&fixture(), args(Some("lowend"), None, false));
         assert_eq!(result.unwrap_err().kind(), ErrorKind::Usage);
         assert_eq!(out, "", "nothing checked");
@@ -347,11 +347,11 @@ mod tests {
     }
 
     #[test]
-    fn missing_modes_file_is_a_usage_error() {
-        let repo = repo_with_modes("");
-        fs::remove_file(repo.path().join(modes::FILE_NAME)).unwrap();
+    fn missing_variants_file_is_a_usage_error() {
+        let repo = repo_with_variants("");
+        fs::remove_file(repo.path().join(variants::FILE_NAME)).unwrap();
         let err = run_on(repo.path(), args(None, None, false)).0.unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Usage);
-        assert!(err.to_string().contains("no modes.toml"));
+        assert!(err.to_string().contains("no variants.toml"));
     }
 }

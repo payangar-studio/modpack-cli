@@ -7,8 +7,8 @@ use crate::platform::Registry;
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// Mode to pack; all modes when omitted
-    pub mode: Option<String>,
+    /// Variant to pack; all variants when omitted
+    pub variant: Option<String>,
     /// Build for this platform only (modrinth or curseforge)
     #[arg(long)]
     pub platform: Option<String>,
@@ -31,7 +31,7 @@ pub fn run(args: Args, ctx: &Context) -> Result<()> {
         root,
         &Registry::builtin(),
         &Request {
-            mode: args.mode.as_deref(),
+            variant: args.variant.as_deref(),
             platform: args.platform.as_deref(),
             out_dir: &out,
             version: &version,
@@ -42,10 +42,10 @@ pub fn run(args: Args, ctx: &Context) -> Result<()> {
     } else {
         for a in &report.artifacts {
             println!(
-                "Built {} ({} pack of mode `{}`).",
+                "Built {} ({} pack of variant `{}`).",
                 a.path.display(),
                 a.platform,
-                a.mode
+                a.variant
             );
         }
         for warning in &report.warnings {

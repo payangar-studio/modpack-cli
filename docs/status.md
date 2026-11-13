@@ -1,6 +1,6 @@
 # `modpack status --json`
 
-`modpack status` reports the state of a pack on this machine: the socle version, the pack's Modrinth instance, the mode loaded there, drift, jars of the instance the manifest does not know, how `mods/` and `mods-local/` of the repository compare to the manifest, and the local mods with their approval. It reads files only: it writes nothing and makes no network call.
+`modpack status` reports the state of a pack on this machine: the socle version, the pack's Modrinth instance, the variant loaded there, drift, jars of the instance the manifest does not know, how `mods/` and `mods-local/` of the repository compare to the manifest, and the local mods with their approval. It reads files only: it writes nothing and makes no network call.
 
 With `--json`, the report is one JSON object on stdout. This format is the contract read by the socle's return skill (`modpack-return`). Logs go to stderr and never mix with it.
 
@@ -19,9 +19,9 @@ With `--json`, the report is one JSON object on stdout. This format is the contr
 | `socle.gap` | `equal`, or `older` when the repository's socle is older than the CLI: `modpack update` brings it up to date. |
 | `instance` | The pack's instance on this machine, or `null` when there is none (no entry in the machine's `instances.toml`, or its directory is gone): `modpack setup` creates it. |
 | `instance.path` | Absolute path of the instance directory. Its `logs/` and `crash-reports/` are there. |
-| `instance.mode` | Mode loaded last, or `null` before the first `modpack mode load`. |
+| `instance.variant` | Variant loaded last, or `null` before the first `modpack variant load`. |
 | `instance.drift` | Files the CLI wrote into the instance that changed or were deleted since, relative to the instance, with `/` separators. |
-| `instance.disabled` | Jars of `drift` that the Modrinth App disabled: renamed `<jar>.disabled`, content unchanged. `modpack mode load <mode> --force` enables them again. |
+| `instance.disabled` | Jars of `drift` that the Modrinth App disabled: renamed `<jar>.disabled`, content unchanged. `modpack variant load <variant> --force` enables them again. |
 | `instance.unknown_jars` | Jars of the instance's `mods/` whose sha1 and sha512 match no manifest entry, whatever their file name, with their hashes so they can be looked up on the platforms. |
 | `missing_jars` | Manifest entries whose jar is absent from `mods/` of the repository, or replaced by an older jar `modpack install` downloaded and nobody changed since: `modpack install` downloads them. A local mod listed here lost its jar from `mods-local/`: git restores it. |
 | `manifest.stale` | `true` when `new_jars` or `changed` is not empty: `modpack manifest` regenerates the manifest. |
@@ -31,7 +31,7 @@ With `--json`, the report is one JSON object on stdout. This format is the contr
 
 Only hashes are compared: the report never asks a platform about a jar.
 
-A jar listed in `missing_jars` does not make the manifest stale: a missing jar means "not installed on this machine", never "removed from the pack", and `modpack manifest` keeps its entry. It is the usual case in a fresh clone, since git does not hold the jars. A mod leaves the pack only through `modpack remove <key>`, which also takes its key out of the modes.
+A jar listed in `missing_jars` does not make the manifest stale: a missing jar means "not installed on this machine", never "removed from the pack", and `modpack manifest` keeps its entry. It is the usual case in a fresh clone, since git does not hold the jars. A mod leaves the pack only through `modpack remove <key>`, which also takes its key out of the variants.
 
 Lists are sorted. Paths of jars are relative (`mods/<name>`, `mods-local/<name>`), to the instance for `unknown_jars`, to the repository otherwise.
 
@@ -63,10 +63,10 @@ JSON Schema (draft 2020-12). It describes this version exactly. A later version 
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["path", "mode", "drift", "disabled", "unknown_jars"],
+          "required": ["path", "variant", "drift", "disabled", "unknown_jars"],
           "properties": {
             "path": { "type": "string" },
-            "mode": { "type": ["string", "null"] },
+            "variant": { "type": ["string", "null"] },
             "drift": { "type": "array", "items": { "type": "string" } },
             "disabled": { "type": "array", "items": { "type": "string" } },
             "unknown_jars": {
@@ -134,7 +134,7 @@ An instance where a config file was changed in game and a mod was tried from the
   "socle": { "repository": "0.1.0", "cli": "0.1.0", "gap": "equal" },
   "instance": {
     "path": "/home/me/.local/share/ModrinthApp/profiles/My Pack",
-    "mode": "default",
+    "variant": "default",
     "drift": ["config/jei-client.toml"],
     "disabled": [],
     "unknown_jars": [

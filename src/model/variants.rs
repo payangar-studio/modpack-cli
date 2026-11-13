@@ -1,8 +1,8 @@
-//! `modes.toml`: the modes of the pack and their conditions.
+//! `variants.toml`: the variants of the pack and their conditions.
 //!
-//! One level of modes. The default mode holds every mod of the manifest but
-//! those it removes; every other mode starts from the default selection,
-//! removes and adds keys. Conditions set at the root apply to every mode,
+//! One level of variants. The default variant holds every mod of the manifest but
+//! those it removes; every other variant starts from the default selection,
+//! removes and adds keys. Conditions set at the root apply to every variant,
 //! the default one included.
 //!
 //! ```toml
@@ -14,7 +14,7 @@
 //! remove = ["hardcore-tweaks"]
 //! conditions = { side = "client" }
 //!
-//! [modes.server]
+//! [variants.server]
 //! remove = ["sodium"]
 //! conditions = { side = "server", server-starts = { timeout = "180s" } }
 //! ```
@@ -32,33 +32,33 @@ use serde::Deserialize;
 use crate::error::{Error, Result};
 use crate::model::manifest::Manifest;
 
-/// File name of the modes, at the root of the repository.
-pub const FILE_NAME: &str = "modes.toml";
-/// Name of the default mode on the command line and in reports.
-pub const DEFAULT_MODE: &str = "default";
+/// File name of the variants, at the root of the repository.
+pub const FILE_NAME: &str = "variants.toml";
+/// Name of the default variant on the command line and in reports.
+pub const DEFAULT_VARIANT: &str = "default";
 /// Timeout of `server-starts` when the file gives none.
 pub const DEFAULT_SERVER_TIMEOUT: Duration = Duration::from_secs(300);
 
-const HINT: &str = "fix modes.toml";
+const HINT: &str = "fix variants.toml";
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Modes {
-    /// Conditions of every mode.
+pub struct Variants {
+    /// Conditions of every variant.
     pub conditions: Vec<Condition>,
-    pub default: DefaultMode,
-    /// Modes other than the default one, by name.
-    pub modes: BTreeMap<String, Mode>,
+    pub default: DefaultVariant,
+    /// Variants other than the default one, by name.
+    pub variants: BTreeMap<String, Variant>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct DefaultMode {
+pub struct DefaultVariant {
     pub description: Option<String>,
     pub remove: Vec<String>,
     pub conditions: Vec<Condition>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct Mode {
+pub struct Variant {
     pub description: Option<String>,
     pub add: Vec<String>,
     pub remove: Vec<String>,
@@ -73,18 +73,18 @@ pub enum Side {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Condition {
-    /// Every mod of the mode accepts this side, after its `env`.
+    /// Every mod of the variant accepts this side, after its `env`.
     Side(Side),
-    /// The required dependencies of every mod are in the mode.
+    /// The required dependencies of every mod are in the variant.
     DepsComplete,
-    /// A dedicated server with the mode's mods reaches `Done` within the timeout.
+    /// A dedicated server with the variant's mods reaches `Done` within the timeout.
     ServerStarts { timeout: Duration },
-    /// The client with the mode's mods reaches the main menu.
+    /// The client with the variant's mods reaches the main menu.
     ClientStarts,
 }
 
 impl Condition {
-    /// Name of the condition in `modes.toml`.
+    /// Name of the condition in `variants.toml`.
     pub fn name(&self) -> &'static str {
         match self {
             Condition::Side(_) => "side",
@@ -95,96 +95,96 @@ impl Condition {
     }
 }
 
-/// A mode once resolved: its mods and its conditions.
+/// A variant once resolved: its mods and its conditions.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Resolved {
     pub name: String,
-    /// Keys of the mode's mods, in manifest key order.
+    /// Keys of the variant's mods, in manifest key order.
     pub keys: Vec<String>,
-    /// Global conditions, then the mode's own.
+    /// Global conditions, then the variant's own.
     pub conditions: Vec<Condition>,
 }
 
-/// An inconsistency between `modes.toml` and the manifest.
+/// An inconsistency between `variants.toml` and the manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Problem {
-    /// A mode names a key the manifest does not have.
-    UnknownKey { mode: String, key: String },
-    /// A mode adds a key the default selection already holds.
-    AlreadyPresent { mode: String, key: String },
+    /// A variant names a key the manifest does not have.
+    UnknownKey { variant: String, key: String },
+    /// A variant adds a key the default selection already holds.
+    AlreadyPresent { variant: String, key: String },
 }
 
 impl fmt::Display for Problem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Problem::UnknownKey { mode, key } => {
+            Problem::UnknownKey { variant, key } => {
                 write!(
                     f,
-                    "mode `{mode}` names `{key}`, which is not in mods.lock.toml"
+                    "variant `{variant}` names `{key}`, which is not in mods.lock.toml"
                 )
             }
-            Problem::AlreadyPresent { mode, key } => write!(
+            Problem::AlreadyPresent { variant, key } => write!(
                 f,
-                "mode `{mode}` adds `{key}`, which the default mode already holds; remove it from the default mode first"
+                "variant `{variant}` adds `{key}`, which the default variant already holds; remove it from the default variant first"
             ),
         }
     }
 }
 
-impl Modes {
+impl Variants {
     pub fn parse(text: &str) -> Result<Self> {
-        let raw: RawModes = super::parse_toml(text, FILE_NAME, HINT)?;
+        let raw: RawVariants = super::parse_toml(text, FILE_NAME, HINT)?;
         let conditions = parse_conditions(&raw.conditions, "the root")?;
 
         if !raw.default.add.is_empty() {
             return Err(invalid(
-                "[default] cannot `add`: the default mode already holds every mod it does not remove"
+                "[default] cannot `add`: the default variant already holds every mod it does not remove"
                     .to_owned(),
             ));
         }
         if let Some(field) = raw.default.extra.keys().next() {
             return Err(invalid(format!(
-                "[default] has an unknown field `{field}` (the default mode only takes `description`, `remove` and `conditions`)"
+                "[default] has an unknown field `{field}` (the default variant only takes `description`, `remove` and `conditions`)"
             )));
         }
-        let default = DefaultMode {
+        let default = DefaultVariant {
             description: raw.default.description,
             remove: raw.default.remove,
             conditions: parse_conditions(&raw.default.conditions, "[default]")?,
         };
         check_no_overlap(&conditions, &default.conditions, "[default]")?;
 
-        let mut modes = BTreeMap::new();
-        for (name, raw) in raw.modes {
-            let place = format!("[modes.{name}]");
-            if name == DEFAULT_MODE {
+        let mut variants = BTreeMap::new();
+        for (name, raw) in raw.variants {
+            let place = format!("[variants.{name}]");
+            if name == DEFAULT_VARIANT {
                 return Err(invalid(format!(
-                    "{place} is reserved: the default mode is set in [default]"
+                    "{place} is reserved: the default variant is set in [default]"
                 )));
             }
             if let Some((field, value)) = raw.extra.iter().next() {
                 return Err(invalid(if value.is_table() {
                     format!(
-                        "[modes.{name}.{field}] nests a mode in a mode; modes have one level, each one defined from the default mode"
+                        "[variants.{name}.{field}] nests a variant in a variant; variants have one level, each one defined from the default variant"
                     )
                 } else {
                     format!("{place} has an unknown field `{field}`")
                 }));
             }
-            let mode = Mode {
+            let variant = Variant {
                 description: raw.description,
                 add: raw.add,
                 remove: raw.remove,
                 conditions: parse_conditions(&raw.conditions, &place)?,
             };
-            check_no_overlap(&conditions, &mode.conditions, &place)?;
-            modes.insert(name, mode);
+            check_no_overlap(&conditions, &variant.conditions, &place)?;
+            variants.insert(name, variant);
         }
 
         Ok(Self {
             conditions,
             default,
-            modes,
+            variants,
         })
     }
 
@@ -192,39 +192,39 @@ impl Modes {
         Self::parse(&super::read_file(path)?)
     }
 
-    /// Names of every mode, the default one first.
+    /// Names of every variant, the default one first.
     pub fn names(&self) -> Vec<&str> {
-        std::iter::once(DEFAULT_MODE)
-            .chain(self.modes.keys().map(String::as_str))
+        std::iter::once(DEFAULT_VARIANT)
+            .chain(self.variants.keys().map(String::as_str))
             .collect()
     }
 
-    /// Every inconsistency with the manifest; empty when the modes are sound.
+    /// Every inconsistency with the manifest; empty when the variants are sound.
     pub fn validate(&self, manifest: &Manifest) -> Vec<Problem> {
         let known = manifest.keys();
         let mut problems = Vec::new();
-        let mut unknown = |mode: &str, keys: &[String]| {
+        let mut unknown = |variant: &str, keys: &[String]| {
             for key in keys.iter().filter(|k| !known.contains(k.as_str())) {
                 problems.push(Problem::UnknownKey {
-                    mode: mode.to_owned(),
+                    variant: variant.to_owned(),
                     key: key.clone(),
                 });
             }
         };
-        unknown(DEFAULT_MODE, &self.default.remove);
-        for (name, mode) in &self.modes {
-            unknown(name, &mode.remove);
-            unknown(name, &mode.add);
+        unknown(DEFAULT_VARIANT, &self.default.remove);
+        for (name, variant) in &self.variants {
+            unknown(name, &variant.remove);
+            unknown(name, &variant.add);
         }
         let default_selection = self.default_selection(manifest);
-        for (name, mode) in &self.modes {
-            for key in mode
+        for (name, variant) in &self.variants {
+            for key in variant
                 .add
                 .iter()
                 .filter(|k| default_selection.contains(k.as_str()))
             {
                 problems.push(Problem::AlreadyPresent {
-                    mode: name.clone(),
+                    variant: name.clone(),
                     key: key.clone(),
                 });
             }
@@ -245,17 +245,17 @@ impl Modes {
         )))
     }
 
-    /// The mods and conditions of a mode. Fails on an unknown mode, or when
-    /// the modes are inconsistent with the manifest.
-    pub fn resolve(&self, mode: &str, manifest: &Manifest) -> Result<Resolved> {
+    /// The mods and conditions of a variant. Fails on an unknown variant, or when
+    /// the variants are inconsistent with the manifest.
+    pub fn resolve(&self, variant: &str, manifest: &Manifest) -> Result<Resolved> {
         self.check(manifest)?;
         let mut selection = self.default_selection(manifest);
-        let own_conditions = if mode == DEFAULT_MODE {
+        let own_conditions = if variant == DEFAULT_VARIANT {
             &self.default.conditions
         } else {
-            let def = self.modes.get(mode).ok_or_else(|| {
+            let def = self.variants.get(variant).ok_or_else(|| {
                 Error::usage(
-                    format!("unknown mode `{mode}`"),
+                    format!("unknown variant `{variant}`"),
                     format!("use one of: {}", self.names().join(", ")),
                 )
             })?;
@@ -266,7 +266,7 @@ impl Modes {
             &def.conditions
         };
         Ok(Resolved {
-            name: mode.to_owned(),
+            name: variant.to_owned(),
             keys: selection.into_iter().map(str::to_owned).collect(),
             conditions: self
                 .conditions
@@ -288,19 +288,19 @@ impl Modes {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawModes {
+struct RawVariants {
     #[serde(default)]
     conditions: toml::Table,
     #[serde(default)]
-    default: RawMode,
+    default: RawVariant,
     #[serde(default)]
-    modes: BTreeMap<String, RawMode>,
+    variants: BTreeMap<String, RawVariant>,
 }
 
-/// A mode as written. `extra` catches what serde would otherwise reject
-/// blindly, to explain it: a nested mode, a misspelt field.
+/// A variant as written. `extra` catches what serde would otherwise reject
+/// blindly, to explain it: a nested variant, a misspelt field.
 #[derive(Deserialize, Default)]
-struct RawMode {
+struct RawVariant {
     description: Option<String>,
     #[serde(default)]
     add: Vec<String>,
@@ -362,14 +362,14 @@ fn parse_conditions(table: &toml::Table, place: &str) -> Result<Vec<Condition>> 
     Ok(conditions)
 }
 
-/// A global condition repeated in a mode would leave two values for one test.
+/// A global condition repeated in a variant would leave two values for one test.
 fn check_no_overlap(global: &[Condition], own: &[Condition], place: &str) -> Result<()> {
     match own
         .iter()
         .find(|c| global.iter().any(|g| g.name() == c.name()))
     {
         Some(c) => Err(invalid(format!(
-            "condition `{}` is set both at the root, for every mode, and in {place}",
+            "condition `{}` is set both at the root, for every variant, and in {place}",
             c.name()
         ))),
         None => Ok(()),
@@ -402,8 +402,8 @@ mod tests {
         Manifest::load(&fixtures().join(crate::model::manifest::FILE_NAME)).unwrap()
     }
 
-    fn modes() -> Modes {
-        Modes::load(&fixtures().join(FILE_NAME)).unwrap()
+    fn variants() -> Variants {
+        Variants::load(&fixtures().join(FILE_NAME)).unwrap()
     }
 
     /// Every key of the fixture manifest but `except`.
@@ -417,20 +417,20 @@ mod tests {
     }
 
     fn parse_err(text: &str) -> String {
-        let err = Modes::parse(text).unwrap_err();
+        let err = Variants::parse(text).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Usage);
         err.to_string()
     }
 
     #[test]
     fn fixture_is_consistent_with_the_manifest() {
-        assert_eq!(modes().validate(&manifest()), Vec::new());
-        assert_eq!(modes().names(), ["default", "hardcore", "server"]);
+        assert_eq!(variants().validate(&manifest()), Vec::new());
+        assert_eq!(variants().names(), ["default", "hardcore", "server"]);
     }
 
     #[test]
-    fn default_mode_is_the_manifest_minus_its_removals() {
-        let resolved = modes().resolve(DEFAULT_MODE, &manifest()).unwrap();
+    fn default_variant_is_the_manifest_minus_its_removals() {
+        let resolved = variants().resolve(DEFAULT_VARIANT, &manifest()).unwrap();
         assert_eq!(resolved.keys, all_but(&["hardcore-tweaks"]));
         assert_eq!(
             resolved.conditions,
@@ -439,8 +439,8 @@ mod tests {
     }
 
     #[test]
-    fn server_mode_removes_from_the_default_selection() {
-        let resolved = modes().resolve("server", &manifest()).unwrap();
+    fn server_variant_removes_from_the_default_selection() {
+        let resolved = variants().resolve("server", &manifest()).unwrap();
         assert_eq!(
             resolved.keys,
             all_but(&["hardcore-tweaks", "sodium", "iris", "jei"])
@@ -458,59 +458,60 @@ mod tests {
     }
 
     #[test]
-    fn mode_adds_a_mod_removed_from_the_default() {
-        let resolved = modes().resolve("hardcore", &manifest()).unwrap();
+    fn variant_adds_a_mod_removed_from_the_default() {
+        let resolved = variants().resolve("hardcore", &manifest()).unwrap();
         assert_eq!(resolved.keys, all_but(&[]));
     }
 
     #[test]
-    fn global_conditions_are_in_every_mode() {
-        let modes = modes();
-        for name in modes.names() {
-            let resolved = modes.resolve(name, &manifest()).unwrap();
+    fn global_conditions_are_in_every_variant() {
+        let variants = variants();
+        for name in variants.names() {
+            let resolved = variants.resolve(name, &manifest()).unwrap();
             assert_eq!(resolved.conditions.first(), Some(&Condition::DepsComplete));
         }
     }
 
     #[test]
-    fn unknown_mode_is_a_usage_error_listing_the_modes() {
-        let err = modes().resolve("lowend", &manifest()).unwrap_err();
+    fn unknown_variant_is_a_usage_error_listing_the_variants() {
+        let err = variants().resolve("lowend", &manifest()).unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Usage);
-        assert!(err.to_string().contains("unknown mode `lowend`"));
+        assert!(err.to_string().contains("unknown variant `lowend`"));
         assert!(err.hint().contains("default, hardcore, server"));
     }
 
     #[test]
     fn unknown_key_is_reported() {
-        let modes =
-            Modes::parse("[default]\nremove = [\"nope\"]\n[modes.a]\nadd = [\"ghost\"]\n").unwrap();
+        let variants =
+            Variants::parse("[default]\nremove = [\"nope\"]\n[variants.a]\nadd = [\"ghost\"]\n")
+                .unwrap();
         assert_eq!(
-            modes.validate(&manifest()),
+            variants.validate(&manifest()),
             [
                 Problem::UnknownKey {
-                    mode: "default".into(),
+                    variant: "default".into(),
                     key: "nope".into()
                 },
                 Problem::UnknownKey {
-                    mode: "a".into(),
+                    variant: "a".into(),
                     key: "ghost".into()
                 },
             ]
         );
-        let err = modes.resolve("a", &manifest()).unwrap_err().to_string();
+        let err = variants.resolve("a", &manifest()).unwrap_err().to_string();
         assert!(err.contains("`ghost`"));
-        assert!(err.starts_with("error: modes.toml: inconsistent with mods.lock.toml:"));
+        assert!(err.starts_with("error: variants.toml: inconsistent with mods.lock.toml:"));
         let first_line = err.lines().next().unwrap();
-        assert_eq!(first_line.matches("modes.toml").count(), 1, "{err}");
+        assert_eq!(first_line.matches("variants.toml").count(), 1, "{err}");
     }
 
     #[test]
     fn adding_a_key_already_in_the_default_is_reported() {
-        let modes = Modes::parse("[modes.a]\nadd = [\"jei\"]\n").unwrap();
+        let variants = Variants::parse("[variants.a]\nadd = [\"jei\"]\n").unwrap();
         assert_eq!(
-            modes.validate(&manifest()),
+            variants.validate(&manifest()),
             [Problem::AlreadyPresent {
-                mode: "a".into(),
+                variant: "a".into(),
                 key: "jei".into()
             }]
         );
@@ -518,28 +519,29 @@ mod tests {
 
     #[test]
     fn unknown_condition_is_refused() {
-        let err = parse_err("[modes.a.conditions]\nfast = true\n");
-        assert!(err.contains("unknown condition `fast` in [modes.a]"));
+        let err = parse_err("[variants.a.conditions]\nfast = true\n");
+        assert!(err.contains("unknown condition `fast` in [variants.a]"));
         assert!(parse_err("[conditions]\nfast = true\n").contains("in the root"));
     }
 
     #[test]
-    fn second_level_of_mode_is_refused() {
-        let err = parse_err("[modes.server.lowend]\nremove = [\"jei\"]\n");
-        assert!(err.contains("[modes.server.lowend] nests a mode in a mode"));
+    fn second_level_of_variant_is_refused() {
+        let err = parse_err("[variants.server.lowend]\nremove = [\"jei\"]\n");
+        assert!(err.contains("[variants.server.lowend] nests a variant in a variant"));
     }
 
     #[test]
-    fn default_mode_cannot_add_nor_be_redefined() {
+    fn default_variant_cannot_add_nor_be_redefined() {
         assert!(parse_err("[default]\nadd = [\"jei\"]\n").contains("[default] cannot `add`"));
         assert!(parse_err("[default]\nremov = []\n").contains("unknown field `remov`"));
-        assert!(parse_err("[modes.default]\n").contains("reserved"));
+        assert!(parse_err("[variants.default]\n").contains("reserved"));
     }
 
     #[test]
-    fn a_global_condition_cannot_be_repeated_in_a_mode() {
-        let err =
-            parse_err("[conditions]\nside = \"client\"\n[modes.a.conditions]\nside = \"server\"\n");
+    fn a_global_condition_cannot_be_repeated_in_a_variant() {
+        let err = parse_err(
+            "[conditions]\nside = \"client\"\n[variants.a.conditions]\nside = \"server\"\n",
+        );
         assert!(err.contains("`side` is set both at the root"));
     }
 
@@ -554,12 +556,12 @@ mod tests {
             parse_err("[conditions]\nserver-starts = { wait = \"1m\" }\n")
                 .contains("invalid value")
         );
-        let modes = Modes::parse(
+        let variants = Variants::parse(
             "[conditions]\nserver-starts = true\nclient-starts = true\ndeps-complete = false\n",
         )
         .unwrap();
         assert_eq!(
-            modes.conditions,
+            variants.conditions,
             [
                 Condition::ClientStarts,
                 Condition::ServerStarts {
@@ -571,15 +573,15 @@ mod tests {
 
     #[test]
     fn reference_doc_example_is_valid_and_names_every_condition() {
-        let doc = include_str!("../../docs/modes.md");
+        let doc = include_str!("../../docs/variants.md");
         let example = doc
             .split("```toml\n")
             .nth(1)
             .and_then(|rest| rest.split("\n```").next())
             .unwrap();
-        let modes = Modes::parse(example).unwrap();
-        assert_eq!(modes.validate(&manifest()), Vec::new());
-        assert_eq!(modes.names(), ["default", "hardcore", "server"]);
+        let variants = Variants::parse(example).unwrap();
+        assert_eq!(variants.validate(&manifest()), Vec::new());
+        assert_eq!(variants.names(), ["default", "hardcore", "server"]);
         for name in crate::conditions::NAMES {
             assert!(
                 doc.contains(&format!("| `{name}` |")),
@@ -599,10 +601,10 @@ mod tests {
     }
 
     #[test]
-    fn empty_file_is_a_default_mode_with_every_mod() {
-        let resolved = Modes::parse("")
+    fn empty_file_is_a_default_variant_with_every_mod() {
+        let resolved = Variants::parse("")
             .unwrap()
-            .resolve(DEFAULT_MODE, &manifest())
+            .resolve(DEFAULT_VARIANT, &manifest())
             .unwrap();
         assert_eq!(resolved.keys, all_but(&[]));
         assert!(resolved.conditions.is_empty());

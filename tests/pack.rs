@@ -11,7 +11,7 @@ use predicates::prelude::*;
 fn repo() -> tempfile::TempDir {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/repo");
     let dir = tempfile::tempdir().unwrap();
-    for file in [".modpack/socle.toml", "mods.lock.toml", "modes.toml"] {
+    for file in [".modpack/socle.toml", "mods.lock.toml", "variants.toml"] {
         let to = dir.path().join(file);
         fs::create_dir_all(to.parent().unwrap()).unwrap();
         fs::copy(fixture.join(file), to).unwrap();
@@ -32,7 +32,7 @@ fn modpack(dir: &Path) -> Command {
 }
 
 #[test]
-fn builds_both_platforms_of_a_mode() {
+fn builds_both_platforms_of_a_variant() {
     let repo = repo();
     modpack(repo.path())
         .args(["pack", "server", "--pack-version", "2.0.0"])
@@ -64,14 +64,14 @@ fn json_lists_artifacts_and_blocked_platforms_then_exits_blocked() {
         .assert()
         .code(3)
         .stderr(predicate::str::contains(
-            "curseforge pack of mode `default`",
+            "curseforge pack of variant `default`",
         ));
     let report: serde_json::Value = serde_json::from_slice(&run.get_output().stdout).unwrap();
     assert_eq!(report["version"], "1.0.0");
     let artifacts = report["artifacts"].as_array().unwrap();
     assert_eq!(artifacts.len(), 1);
     assert_eq!(artifacts[0]["platform"], "modrinth");
-    assert_eq!(artifacts[0]["mode"], "default");
+    assert_eq!(artifacts[0]["variant"], "default");
     let path = artifacts[0]["path"].as_str().unwrap();
     assert_eq!(
         Path::new(path),

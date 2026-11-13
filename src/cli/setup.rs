@@ -4,7 +4,7 @@
 //! 2. downloads the missing jars (`modpack install`);
 //! 3. registers the pack's instance in the Modrinth App, unless it is there
 //!    already or `--no-launch` is given;
-//! 4. loads the default mode into the instance, unless a mode is loaded there
+//! 4. loads the default variant into the instance, unless a variant is loaded there
 //!    already (step 2 reloaded it).
 
 use std::io::Write;
@@ -14,14 +14,14 @@ use crate::context::Context;
 use crate::error::{Error, Result};
 use crate::launcher::running::{GameDetector, Processes};
 use crate::launcher::{PACK_PLATFORM, dirs};
-use crate::mode::{self, LoadContext};
 use crate::model::instance::{InstanceState, Instances};
 use crate::model::manifest::{self, Manifest};
-use crate::model::modes::DEFAULT_MODE;
 use crate::model::socle::SocleConfig;
+use crate::model::variants::DEFAULT_VARIANT;
 use crate::platform::Registry;
 use crate::setup::{self as steps, InstalledApp, Machine, REGISTER_TIMEOUT};
 use crate::store::download::{Http, Sources};
+use crate::variant::{self, LoadContext};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -93,8 +93,8 @@ fn setup(
         return Ok(());
     };
 
-    if let Some(mode) = InstanceState::load(&instance)?.mode {
-        writeln!(out, "mode `{mode}` already loaded")?;
+    if let Some(variant) = InstanceState::load(&instance)?.variant {
+        writeln!(out, "variant `{variant}` already loaded")?;
         return Ok(());
     }
     let ctx = LoadContext {
@@ -103,7 +103,7 @@ fn setup(
         game,
         sources,
     };
-    let report = mode::load(&ctx, DEFAULT_MODE, false)?;
+    let report = variant::load(&ctx, DEFAULT_VARIANT, false)?;
     write!(out, "{report}")?;
     Ok(())
 }
@@ -212,7 +212,7 @@ mod tests {
             manifest(vec![jei])
                 .save(&root.path().join(manifest::FILE_NAME))
                 .unwrap();
-            fs::write(root.path().join("modes.toml"), "[default]\n").unwrap();
+            fs::write(root.path().join("variants.toml"), "[default]\n").unwrap();
             let machine = tempfile::tempdir().unwrap();
             let app = ClickingApp {
                 profiles: machine.path().join("profiles"),
@@ -275,7 +275,7 @@ mod tests {
         assert!(out.contains("git hooks enabled"), "{out}");
         assert!(out.contains("1 downloaded"), "{out}");
         assert!(out.contains("instance registered"), "{out}");
-        assert!(out.contains("mode `default` loaded into"), "{out}");
+        assert!(out.contains("variant `default` loaded into"), "{out}");
         assert_eq!(world.opened(), 1);
         let instance = world.machine.path().join("profiles/Test Pack");
         assert!(instance.join("mods/jei-1.0.0.jar").is_file());
@@ -289,25 +289,25 @@ mod tests {
     }
 
     #[test]
-    fn a_loaded_mode_is_kept() {
+    fn a_loaded_variant_is_kept() {
         let world = World::new();
         world.setup_with(&world.fetch, false).0.unwrap();
         fs::write(
-            world.root.path().join("modes.toml"),
-            "[default]\n\n[modes.server]\nremove = [\"jei\"]\n",
+            world.root.path().join("variants.toml"),
+            "[default]\n\n[variants.server]\nremove = [\"jei\"]\n",
         )
         .unwrap();
         let instance = world.machine.path().join("profiles/Test Pack");
         let mut state = InstanceState::load(&instance).unwrap();
-        state.mode = Some("server".into());
+        state.variant = Some("server".into());
         state.save(&instance).unwrap();
 
         let (result, out) = world.setup_with(&NoFetch, false);
         result.unwrap();
-        assert!(out.contains("mode `server` loaded into"), "{out}");
-        assert!(out.contains("mode `server` already loaded"), "{out}");
+        assert!(out.contains("variant `server` loaded into"), "{out}");
+        assert!(out.contains("variant `server` already loaded"), "{out}");
         assert_eq!(
-            InstanceState::load(&instance).unwrap().mode.as_deref(),
+            InstanceState::load(&instance).unwrap().variant.as_deref(),
             Some("server")
         );
     }
@@ -338,6 +338,6 @@ mod tests {
         let (result, out) = world.setup_with(&NoFetch, false);
         result.unwrap();
         assert_eq!(world.opened(), 2);
-        assert!(out.contains("mode `default` loaded into"), "{out}");
+        assert!(out.contains("variant `default` loaded into"), "{out}");
     }
 }

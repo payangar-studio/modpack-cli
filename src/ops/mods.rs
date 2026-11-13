@@ -6,8 +6,8 @@
 //! the manifest is written. A jar already in `mods-local/` is a local mod,
 //! tracked by git; a mod added from a platform whose slug is the key of a
 //! local mod replaces it, and its jar leaves git once the manifest is saved.
-//! A mod for one mode only is removed from the default mode and added to that
-//! mode in `modes.toml`.
+//! A mod for one variant only is removed from the default variant and added to that
+//! variant in `variants.toml`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -16,10 +16,10 @@ use std::path::Path;
 
 use super::local::{jar_committed, remove_jar};
 use super::manifest::{Draft, check_file_name, complete, first_line, load_or_new};
-use super::modes_edit;
+use super::variants_edit;
 use crate::error::{Context, Error, Result};
 use crate::model::manifest::{self, Entry, Env, Hashes, Manifest, Pack, normalize_key};
-use crate::model::modes::DEFAULT_MODE;
+use crate::model::variants::DEFAULT_VARIANT;
 use crate::platform::{Candidate, Download, Platform, ProjectName};
 use crate::prompt::Prompt;
 use crate::store::download::{Sources, download};
@@ -37,8 +37,8 @@ pub struct AddRequest {
     /// Slug, id or URL of a mod on a platform, or path to a local jar.
     pub mod_ref: String,
     pub version: Option<String>,
-    /// Mode the mod is for, alone; `None` puts it in every mode.
-    pub mode: Option<String>,
+    /// Variant the mod is for, alone; `None` puts it in every variant.
+    pub variant: Option<String>,
     /// Direct URL of a jar no platform knows.
     pub url: Option<String>,
     /// Add the missing required dependencies without asking.
@@ -84,9 +84,9 @@ pub fn add(
     req: &AddRequest,
     out: &mut dyn Write,
 ) -> Result<String> {
-    let mode = req.mode.as_deref().filter(|m| *m != DEFAULT_MODE);
-    if let Some(mode) = mode {
-        modes_edit::require_mode(root, mode)?;
+    let variant = req.variant.as_deref().filter(|m| *m != DEFAULT_VARIANT);
+    if let Some(variant) = variant {
+        variants_edit::require_variant(root, variant)?;
     }
     let mut edit = Edit {
         manifest: load_or_new(root)?,
@@ -153,22 +153,22 @@ pub fn add(
         }
     }
 
-    if let Some(mode) = mode.filter(|_| !added.is_empty()) {
-        modes_edit::edit(root, |doc| {
+    if let Some(variant) = variant.filter(|_| !added.is_empty()) {
+        variants_edit::edit(root, |doc| {
             added
                 .iter()
-                .try_for_each(|k| modes_edit::move_to_mode(doc, k, mode))
+                .try_for_each(|k| variants_edit::move_to_variant(doc, k, variant))
         })?;
         writeln!(
             out,
-            "mode `{mode}`: {} removed from the default mode and added to `{mode}`",
+            "variant `{variant}`: {} removed from the default variant and added to `{variant}`",
             quoted(&added)
         )?;
     }
     Ok(key)
 }
 
-/// Removes a mod: its jar, its entry, and its key from every mode.
+/// Removes a mod: its jar, its entry, and its key from every variant.
 pub fn remove(root: &Path, key: &str, out: &mut dyn Write) -> Result<()> {
     let path = root.join(manifest::FILE_NAME);
     let mut manifest = Manifest::load(&path)?;
@@ -187,10 +187,10 @@ pub fn remove(root: &Path, key: &str, out: &mut dyn Write) -> Result<()> {
     }
     manifest.remove(key);
     manifest.save(&path)?;
-    let in_modes = modes_edit::edit(root, |doc| Ok(modes_edit::remove_key(doc, key)))?;
+    let in_variants = variants_edit::edit(root, |doc| Ok(variants_edit::remove_key(doc, key)))?;
     writeln!(out, "removed `{key}`")?;
-    if in_modes {
-        writeln!(out, "removed `{key}` from the modes that listed it")?;
+    if in_variants {
+        writeln!(out, "removed `{key}` from the variants that listed it")?;
     }
     Ok(())
 }
@@ -812,7 +812,7 @@ mod tests {
         Manifest::load(&root.join(manifest::FILE_NAME)).unwrap()
     }
 
-    const MODES: &str = "# Modes, written by hand.\n[default]\ndescription = \"Full\"\n\n# The server.\n[modes.server]\nremove = [\"jei\"]\n";
+    const VARIANTS: &str = "# Variants, written by hand.\n[default]\ndescription = \"Full\"\n\n# The server.\n[variants.server]\nremove = [\"jei\"]\n";
 
     #[test]
     fn remote_mod_is_downloaded_and_gets_both_sets_of_ids() {
@@ -885,27 +885,27 @@ mod tests {
     }
 
     #[test]
-    fn mode_moves_the_mod_out_of_the_default_mode() {
+    fn variant_moves_the_mod_out_of_the_default_variant() {
         let root = repo();
-        fs::write(root.path().join("modes.toml"), MODES).unwrap();
+        fs::write(root.path().join("variants.toml"), VARIANTS).unwrap();
         let mut req = request("sodium");
-        req.mode = Some("server".into());
+        req.variant = Some("server".into());
         let (result, out) = run_add(root.path(), &registry(), &req);
         result.unwrap();
         assert!(out.contains("added to `server`"), "{out}");
-        let modes = fs::read_to_string(root.path().join("modes.toml")).unwrap();
+        let variants = fs::read_to_string(root.path().join("variants.toml")).unwrap();
         assert_eq!(
-            modes,
-            "# Modes, written by hand.\n[default]\ndescription = \"Full\"\nremove = [\"sodium\"]\n\n# The server.\n[modes.server]\nremove = [\"jei\"]\nadd = [\"sodium\"]\n"
+            variants,
+            "# Variants, written by hand.\n[default]\ndescription = \"Full\"\nremove = [\"sodium\"]\n\n# The server.\n[variants.server]\nremove = [\"jei\"]\nadd = [\"sodium\"]\n"
         );
     }
 
     #[test]
-    fn unknown_mode_is_refused_before_anything_is_downloaded() {
+    fn unknown_variant_is_refused_before_anything_is_downloaded() {
         let root = repo();
-        fs::write(root.path().join("modes.toml"), MODES).unwrap();
+        fs::write(root.path().join("variants.toml"), VARIANTS).unwrap();
         let mut req = request("sodium");
-        req.mode = Some("lowend".into());
+        req.variant = Some("lowend".into());
         let err = run_add(root.path(), &registry(), &req).0.unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Usage);
         assert!(!root.path().join("mods/sodium-1.0.0.jar").exists());
@@ -958,12 +958,12 @@ mod tests {
     }
 
     #[test]
-    fn with_deps_adds_dependencies_and_theirs_to_the_same_mode() {
+    fn with_deps_adds_dependencies_and_theirs_to_the_same_variant() {
         let root = repo();
-        fs::write(root.path().join("modes.toml"), MODES).unwrap();
+        fs::write(root.path().join("variants.toml"), VARIANTS).unwrap();
         let mut req = request("sodium");
         req.with_deps = true;
-        req.mode = Some("server".into());
+        req.variant = Some("server".into());
         let (result, out) = run_add(root.path(), &with_dependency(), &req);
         result.unwrap();
         let manifest = load(root.path());
@@ -972,17 +972,17 @@ mod tests {
             ["fabric-api", "fabric-loader-lib", "sodium"]
         );
         assert!(missing_dependencies(&manifest, &["sodium".into()]).is_empty());
-        let modes = fs::read_to_string(root.path().join("modes.toml")).unwrap();
+        let variants = fs::read_to_string(root.path().join("variants.toml")).unwrap();
         assert!(
-            modes.contains("add = [\"sodium\", \"fabric-api\", \"fabric-loader-lib\"]"),
-            "{modes}\n{out}"
+            variants.contains("add = [\"sodium\", \"fabric-api\", \"fabric-loader-lib\"]"),
+            "{variants}\n{out}"
         );
     }
 
     #[test]
     fn with_deps_on_a_mod_in_the_pack_adds_only_its_dependencies() {
         let root = repo();
-        fs::write(root.path().join("modes.toml"), MODES).unwrap();
+        fs::write(root.path().join("variants.toml"), VARIANTS).unwrap();
         let registry = Registry::new(vec![Box::new(TwoVersions(dependency_chain()))]);
         let mut req = request("sodium");
         req.version = Some("0.9.0".into());
@@ -1152,13 +1152,13 @@ mod tests {
     }
 
     /// A git repository with the local mod `sodium` (a development build),
-    /// committed, listed in the manifest and in a mode.
+    /// committed, listed in the manifest and in a variant.
     fn with_local_sodium() -> tempfile::TempDir {
         let root = repo();
         git(root.path(), &["init", "--quiet"]);
         fs::create_dir_all(root.path().join("mods-local")).unwrap();
         fs::write(root.path().join("mods-local/sodium-dev.jar"), b"dev build").unwrap();
-        fs::write(root.path().join("modes.toml"), MODES).unwrap();
+        fs::write(root.path().join("variants.toml"), VARIANTS).unwrap();
         let jar = root.path().join("mods-local/sodium-dev.jar");
         let (result, out) = run_add(root.path(), &registry(), &request(jar.to_str().unwrap()));
         assert_eq!(result.unwrap(), "sodium-dev");
@@ -1326,7 +1326,7 @@ mod tests {
     #[test]
     fn adding_the_published_mod_replaces_the_local_one_and_its_jar_leaves_git() {
         let root = with_local_sodium();
-        let modes = fs::read_to_string(root.path().join("modes.toml")).unwrap();
+        let variants = fs::read_to_string(root.path().join("variants.toml")).unwrap();
 
         let (result, out) = run_add(root.path(), &registry(), &request("sodium"));
         assert_eq!(result.unwrap(), "sodium");
@@ -1340,8 +1340,8 @@ mod tests {
         assert!(!root.path().join("mods-local/sodium-dev.jar").exists());
         assert_eq!(git(root.path(), &["ls-files", "mods-local"]), "");
         assert_eq!(
-            fs::read_to_string(root.path().join("modes.toml")).unwrap(),
-            modes
+            fs::read_to_string(root.path().join("variants.toml")).unwrap(),
+            variants
         );
     }
 
@@ -1410,10 +1410,10 @@ mod tests {
     }
 
     #[test]
-    fn remove_cleans_manifest_mods_and_modes() {
+    fn remove_cleans_manifest_mods_and_variants() {
         let root = repo();
-        let modes = "# Hand-written.\n[default]\nremove = [\"sodium\", \"jei\"]\n\n[modes.server]\n# Server only.\nadd = [\"sodium\"]\n";
-        fs::write(root.path().join("modes.toml"), modes).unwrap();
+        let variants = "# Hand-written.\n[default]\nremove = [\"sodium\", \"jei\"]\n\n[variants.server]\n# Server only.\nadd = [\"sodium\"]\n";
+        fs::write(root.path().join("variants.toml"), variants).unwrap();
         run_add(root.path(), &registry(), &request("sodium"))
             .0
             .unwrap();
@@ -1424,7 +1424,7 @@ mod tests {
         let mut out = Vec::new();
         remove(root.path(), "sodium", &mut out).unwrap();
         let out = String::from_utf8(out).unwrap();
-        assert!(out.contains("from the modes that listed it"), "{out}");
+        assert!(out.contains("from the variants that listed it"), "{out}");
         assert!(!root.path().join("mods/sodium-1.0.0.jar").exists());
         assert!(root.path().join("mods/jei-1.0.0.jar").exists());
         assert_eq!(
@@ -1432,8 +1432,8 @@ mod tests {
             ["jei"]
         );
         assert_eq!(
-            fs::read_to_string(root.path().join("modes.toml")).unwrap(),
-            "# Hand-written.\n[default]\nremove = [\"jei\"]\n\n[modes.server]\n# Server only.\nadd = []\n"
+            fs::read_to_string(root.path().join("variants.toml")).unwrap(),
+            "# Hand-written.\n[default]\nremove = [\"jei\"]\n\n[variants.server]\n# Server only.\nadd = []\n"
         );
         assert!(crate::ops::manifest::check(root.path()).unwrap().is_empty());
 

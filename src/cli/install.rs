@@ -1,5 +1,5 @@
 //! `modpack install`: downloads the missing jars into mods/, then reloads the
-//! mode loaded in the pack's instance.
+//! variant loaded in the pack's instance.
 
 use std::fs;
 use std::io::Write;
@@ -8,7 +8,6 @@ use std::path::Path;
 use crate::context::Context;
 use crate::error::{Context as _, Error, Result};
 use crate::launcher::running::{GameDetector, Processes};
-use crate::mode::{self, LoadContext};
 use crate::model::installed::Installed;
 use crate::model::instance::Instances;
 use crate::model::manifest::{self, Entry, Manifest};
@@ -16,6 +15,7 @@ use crate::ops::local::restore_hint;
 use crate::platform::Registry;
 use crate::store::download::{Failure, Http, Sources, download_all};
 use crate::store::inventory::{Inventory, inventory};
+use crate::variant::{self, LoadContext};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
@@ -218,14 +218,14 @@ fn write_failure(out: &mut dyn Write, failure: &Failure) -> Result<()> {
     Ok(())
 }
 
-/// Reloads the mode loaded in the pack's instance, if the pack has an
-/// instance on this machine and a mode was loaded there.
+/// Reloads the variant loaded in the pack's instance, if the pack has an
+/// instance on this machine and a variant was loaded there.
 fn reload(ctx: &LoadContext<'_>, out: &mut dyn Write) -> Result<()> {
-    let Some(mode) = mode::loaded_mode(ctx.root, ctx.instances_file)? else {
-        tracing::info!("no instance with a loaded mode on this machine, nothing to reload");
+    let Some(variant) = variant::loaded_variant(ctx.root, ctx.instances_file)? else {
+        tracing::info!("no instance with a loaded variant on this machine, nothing to reload");
         return Ok(());
     };
-    let report = mode::load(ctx, &mode, false)?;
+    let report = variant::load(ctx, &variant, false)?;
     write!(out, "{report}")?;
     Ok(())
 }
@@ -450,7 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn reloads_the_mode_loaded_in_the_instance() {
+    fn reloads_the_variant_loaded_in_the_instance() {
         let repo = Repo::new();
         let instance = repo.machine.path().join("profiles/Test Pack");
         fs::create_dir_all(&instance).unwrap();
@@ -460,22 +460,22 @@ mod tests {
 
         let (result, out) = repo.install(false);
         result.unwrap();
-        assert!(!out.contains("mode"), "no mode loaded yet: {out}");
+        assert!(!out.contains("variant"), "no variant loaded yet: {out}");
 
         fs::write(
-            repo.path("modes.toml"),
-            "[modes.server]\nremove = [\"iris\"]\n",
+            repo.path("variants.toml"),
+            "[variants.server]\nremove = [\"iris\"]\n",
         )
         .unwrap();
         InstanceState {
-            mode: Some("server".into()),
+            variant: Some("server".into()),
             ..Default::default()
         }
         .save(&instance)
         .unwrap();
         let (result, out) = repo.install_with(&NoFetch, false);
         result.unwrap();
-        assert!(out.contains("mode `server` loaded into"), "{out}");
+        assert!(out.contains("variant `server` loaded into"), "{out}");
         assert!(out.contains("jars copied: mods/jei-1.0.0.jar\n"), "{out}");
         assert!(instance.join("mods/jei-1.0.0.jar").is_file());
         assert!(!instance.join("mods/iris-1.0.0.jar").exists());
@@ -489,10 +489,10 @@ mod tests {
         let mut instances = Instances::default();
         instances.set(PACK, instance.clone());
         instances.save(&repo.instances_file()).unwrap();
-        fs::write(repo.path("modes.toml"), "[default]\n").unwrap();
+        fs::write(repo.path("variants.toml"), "[default]\n").unwrap();
         fs::write(instance.join("config/a.toml"), "changed in game").unwrap();
         let mut state = InstanceState {
-            mode: Some("default".into()),
+            variant: Some("default".into()),
             ..Default::default()
         };
         state.files.insert("config/a.toml".into(), "0".repeat(64));
@@ -521,9 +521,9 @@ mod tests {
         let mut instances = Instances::default();
         instances.set(PACK, instance.clone());
         instances.save(&repo.instances_file()).unwrap();
-        fs::write(repo.path("modes.toml"), "[default]\n").unwrap();
+        fs::write(repo.path("variants.toml"), "[default]\n").unwrap();
         InstanceState {
-            mode: Some("default".into()),
+            variant: Some("default".into()),
             ..Default::default()
         }
         .save(&instance)

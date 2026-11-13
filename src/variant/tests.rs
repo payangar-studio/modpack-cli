@@ -20,7 +20,7 @@ impl GameDetector for Game {
 /// A repository whose manifest lists `a`, `b`, `c` and `extra`, with their
 /// jars in `mods/`; an instance registered for the pack on the machine.
 ///
-/// The default mode removes `extra`; `server` removes `a` and adds `extra`.
+/// The default variant removes `extra`; `server` removes `a` and adds `extra`.
 /// Base config: `config/a.toml`, `config/sub/b.toml`; `server` overrides
 /// `config/a.toml` and adds `config/server.toml`.
 struct Setup {
@@ -54,8 +54,8 @@ impl Setup {
         }
         write(
             root,
-            modes::FILE_NAME,
-            "[default]\nremove = [\"extra\"]\n\n[modes.server]\nremove = [\"a\"]\nadd = [\"extra\"]\n",
+            variants::FILE_NAME,
+            "[default]\nremove = [\"extra\"]\n\n[variants.server]\nremove = [\"a\"]\nadd = [\"extra\"]\n",
         );
         write(root, "config/a.toml", "base a");
         write(root, "config/sub/b.toml", "base b");
@@ -90,7 +90,7 @@ impl Setup {
 
     fn load_with(
         &self,
-        mode: &str,
+        variant: &str,
         force: bool,
         running: bool,
         fetch: &dyn Fetch,
@@ -105,11 +105,11 @@ impl Setup {
                 fetch,
             },
         };
-        load(&ctx, mode, force)
+        load(&ctx, variant, force)
     }
 
-    fn load(&self, mode: &str, force: bool) -> Result<LoadReport> {
-        self.load_with(mode, force, false, &NoFetch)
+    fn load(&self, variant: &str, force: bool) -> Result<LoadReport> {
+        self.load_with(variant, force, false, &NoFetch)
     }
 
     fn read(&self, rel: &str) -> String {
@@ -144,9 +144,9 @@ fn on_disk(instance: &Path, paths: &[&str]) -> BTreeMap<String, String> {
 }
 
 #[test]
-fn first_load_copies_the_mode_jars_and_writes_the_config() {
+fn first_load_copies_the_variant_jars_and_writes_the_config() {
     let s = Setup::new();
-    let report = s.load(modes::DEFAULT_MODE, false).unwrap();
+    let report = s.load(variants::DEFAULT_VARIANT, false).unwrap();
 
     assert_eq!(
         report.copied,
@@ -160,23 +160,23 @@ fn first_load_copies_the_mode_jars_and_writes_the_config() {
     assert!(!s.instance().join("config/.gitkeep").exists());
 
     let text = report.to_string();
-    assert!(text.contains("mode `default` loaded into"), "{text}");
+    assert!(text.contains("variant `default` loaded into"), "{text}");
     assert!(text.contains("jars copied: mods/a-1.0.0.jar"), "{text}");
 }
 
 #[test]
 fn loading_again_reports_only_what_changed() {
     let s = Setup::new();
-    s.load(modes::DEFAULT_MODE, false).unwrap();
-    let report = s.load(modes::DEFAULT_MODE, false).unwrap();
+    s.load(variants::DEFAULT_VARIANT, false).unwrap();
+    let report = s.load(variants::DEFAULT_VARIANT, false).unwrap();
     assert!(report.written.is_empty() && report.copied.is_empty());
     let text = report.to_string();
     assert!(text.contains("nothing changed in the instance"), "{text}");
     assert!(!text.contains("config written"), "{text}");
 
-    // Only the file the mode changes is written.
+    // Only the file the variant changes is written.
     write(s.root(), "config/sub/b.toml", "new b");
-    let report = s.load(modes::DEFAULT_MODE, false).unwrap();
+    let report = s.load(variants::DEFAULT_VARIANT, false).unwrap();
     assert_eq!(report.written, ["config/sub/b.toml"]);
     assert!(!report.to_string().contains("nothing changed"));
     assert_eq!(s.read("config/sub/b.toml"), "new b");
@@ -185,9 +185,9 @@ fn loading_again_reports_only_what_changed() {
 #[test]
 fn state_reflects_exactly_the_files_written() {
     let s = Setup::new();
-    s.load(modes::DEFAULT_MODE, false).unwrap();
+    s.load(variants::DEFAULT_VARIANT, false).unwrap();
     let state = s.state();
-    assert_eq!(state.mode.as_deref(), Some("default"));
+    assert_eq!(state.variant.as_deref(), Some("default"));
     assert_eq!(
         state.files,
         on_disk(
@@ -204,7 +204,7 @@ fn state_reflects_exactly_the_files_written() {
 
     // Back from `server`, its own config file is removed.
     s.load("server", false).unwrap();
-    let report = s.load(modes::DEFAULT_MODE, false).unwrap();
+    let report = s.load(variants::DEFAULT_VARIANT, false).unwrap();
     assert_eq!(report.config_removed, ["config/server.toml"]);
     assert!(
         report
@@ -216,26 +216,26 @@ fn state_reflects_exactly_the_files_written() {
 }
 
 #[test]
-fn a_config_file_of_the_previous_mode_changed_since_is_drift() {
+fn a_config_file_of_the_previous_variant_changed_since_is_drift() {
     let s = Setup::new();
     s.load("server", false).unwrap();
     write(&s.instance(), "config/server.toml", "changed in game");
 
-    let err = s.load(modes::DEFAULT_MODE, false).unwrap_err();
+    let err = s.load(variants::DEFAULT_VARIANT, false).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::Blocked);
     assert!(err.to_string().contains("- config/server.toml"));
     assert_eq!(s.read("config/server.toml"), "changed in game");
 
-    let report = s.load(modes::DEFAULT_MODE, true).unwrap();
+    let report = s.load(variants::DEFAULT_VARIANT, true).unwrap();
     assert_eq!(report.forced, ["config/server.toml"]);
     assert_eq!(report.config_removed, ["config/server.toml"]);
     assert!(!s.instance().join("config/server.toml").exists());
 }
 
 #[test]
-fn switching_mode_removes_and_adds_jars() {
+fn switching_variant_removes_and_adds_jars() {
     let s = Setup::new();
-    s.load(modes::DEFAULT_MODE, false).unwrap();
+    s.load(variants::DEFAULT_VARIANT, false).unwrap();
 
     let report = s.load("server", false).unwrap();
     assert_eq!(report.removed, ["mods/a-1.0.0.jar"]);
@@ -249,12 +249,12 @@ fn switching_mode_removes_and_adds_jars() {
         ]
     );
     let state = s.state();
-    assert_eq!(state.mode.as_deref(), Some("server"));
+    assert_eq!(state.variant.as_deref(), Some("server"));
     assert!(!state.files.contains_key("mods/a-1.0.0.jar"));
     assert!(state.files.contains_key("mods/b-1.0.0.jar"));
     assert!(state.files.contains_key("mods/extra-1.0.0.jar"));
 
-    let report = s.load(modes::DEFAULT_MODE, false).unwrap();
+    let report = s.load(variants::DEFAULT_VARIANT, false).unwrap();
     assert_eq!(report.removed, ["mods/extra-1.0.0.jar"]);
     assert_eq!(report.copied, ["mods/a-1.0.0.jar"]);
 }
@@ -263,7 +263,7 @@ fn switching_mode_removes_and_adds_jars() {
 fn a_known_jar_under_another_name_counts_as_present() {
     let s = Setup::new();
     write(&s.instance(), "mods/renamed-b.jar", "b");
-    let report = s.load(modes::DEFAULT_MODE, false).unwrap();
+    let report = s.load(variants::DEFAULT_VARIANT, false).unwrap();
     assert_eq!(report.copied, ["mods/a-1.0.0.jar", "mods/c-1.0.0.jar"]);
     assert!(s.state().files.contains_key("mods/renamed-b.jar"));
 
@@ -275,7 +275,7 @@ fn a_known_jar_under_another_name_counts_as_present() {
 #[test]
 fn a_jar_the_cli_wrote_is_removed_once_the_manifest_drops_it() {
     let s = Setup::new();
-    s.load(modes::DEFAULT_MODE, false).unwrap();
+    s.load(variants::DEFAULT_VARIANT, false).unwrap();
 
     // `b` updated to a new jar under another name, `c` updated under the same name.
     let path = s.root().join(manifest::FILE_NAME);
@@ -288,7 +288,7 @@ fn a_jar_the_cli_wrote_is_removed_once_the_manifest_drops_it() {
     write(s.root(), "mods/b-2.0.0.jar", "b2");
     write(s.root(), "mods/c-1.0.0.jar", "c2");
 
-    let report = s.load(modes::DEFAULT_MODE, false).unwrap();
+    let report = s.load(variants::DEFAULT_VARIANT, false).unwrap();
     assert_eq!(report.removed, ["mods/b-1.0.0.jar", "mods/c-1.0.0.jar"]);
     assert!(report.unknown.is_empty() && report.forced.is_empty());
     assert_eq!(
@@ -303,7 +303,7 @@ fn a_jar_the_cli_wrote_is_removed_once_the_manifest_drops_it() {
 fn a_jar_unknown_to_the_manifest_is_never_touched() {
     let s = Setup::new();
     write(&s.instance(), "mods/tried.jar", "tried in the app");
-    let report = s.load(modes::DEFAULT_MODE, false).unwrap();
+    let report = s.load(variants::DEFAULT_VARIANT, false).unwrap();
     assert_eq!(report.unknown, ["mods/tried.jar"]);
     assert!(
         report
@@ -320,7 +320,7 @@ fn a_jar_unknown_to_the_manifest_is_never_touched() {
 #[test]
 fn drift_blocks_then_force_overwrites() {
     let s = Setup::new();
-    s.load(modes::DEFAULT_MODE, false).unwrap();
+    s.load(variants::DEFAULT_VARIANT, false).unwrap();
     write(&s.instance(), "config/a.toml", "changed in game");
     fs::remove_file(s.instance().join("mods/b-1.0.0.jar")).unwrap();
 
@@ -335,7 +335,7 @@ fn drift_blocks_then_force_overwrites() {
     );
     assert!(err.hint().contains("--force"));
     assert_eq!(s.read("config/a.toml"), "changed in game");
-    assert_eq!(s.state().mode.as_deref(), Some("default"));
+    assert_eq!(s.state().variant.as_deref(), Some("default"));
 
     let report = s.load("server", true).unwrap();
     assert_eq!(report.forced, ["config/a.toml", "mods/b-1.0.0.jar"]);
@@ -347,12 +347,12 @@ fn drift_blocks_then_force_overwrites() {
 #[test]
 fn a_jar_disabled_in_the_app_is_drift_and_force_restores_it() {
     let s = Setup::new();
-    s.load(modes::DEFAULT_MODE, false).unwrap();
+    s.load(variants::DEFAULT_VARIANT, false).unwrap();
     let jar = s.instance().join("mods/b-1.0.0.jar");
     let disabled = s.instance().join("mods/b-1.0.0.jar.disabled");
     fs::rename(&jar, &disabled).unwrap();
 
-    let err = s.load(modes::DEFAULT_MODE, false).unwrap_err();
+    let err = s.load(variants::DEFAULT_VARIANT, false).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::Blocked);
     assert!(
         err.to_string()
@@ -360,15 +360,15 @@ fn a_jar_disabled_in_the_app_is_drift_and_force_restores_it() {
         "{err}"
     );
 
-    let report = s.load(modes::DEFAULT_MODE, true).unwrap();
+    let report = s.load(variants::DEFAULT_VARIANT, true).unwrap();
     assert_eq!(report.forced, ["mods/b-1.0.0.jar"]);
     assert_eq!(report.copied, ["mods/b-1.0.0.jar"]);
     assert!(jar.is_file());
     assert!(!disabled.exists());
-    assert!(s.load(modes::DEFAULT_MODE, false).is_ok());
+    assert!(s.load(variants::DEFAULT_VARIANT, false).is_ok());
 
-    // Disabled, then forced into a mode without it: the disabled copy goes too.
-    s.load(modes::DEFAULT_MODE, false).unwrap();
+    // Disabled, then forced into a variant without it: the disabled copy goes too.
+    s.load(variants::DEFAULT_VARIANT, false).unwrap();
     let a = s.instance().join("mods/a-1.0.0.jar");
     fs::rename(&a, s.instance().join("mods/a-1.0.0.jar.disabled")).unwrap();
     s.load("server", true).unwrap();
@@ -380,12 +380,12 @@ fn a_jar_disabled_in_the_app_is_drift_and_force_restores_it() {
 fn a_foreign_file_where_a_jar_goes_blocks_without_force() {
     let s = Setup::new();
     write(&s.instance(), "mods/a-1.0.0.jar", "someone else's a");
-    let err = s.load(modes::DEFAULT_MODE, false).unwrap_err();
+    let err = s.load(variants::DEFAULT_VARIANT, false).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::Blocked);
     assert!(err.to_string().contains("- mods/a-1.0.0.jar"));
     assert_eq!(s.read("mods/a-1.0.0.jar"), "someone else's a");
 
-    let report = s.load(modes::DEFAULT_MODE, true).unwrap();
+    let report = s.load(variants::DEFAULT_VARIANT, true).unwrap();
     assert_eq!(report.forced, ["mods/a-1.0.0.jar"]);
     assert!(report.unknown.is_empty());
     assert_eq!(s.read("mods/a-1.0.0.jar"), "a");
@@ -395,7 +395,7 @@ fn a_foreign_file_where_a_jar_goes_blocks_without_force() {
 fn running_minecraft_is_refused_and_nothing_is_written() {
     let s = Setup::new();
     let err = s
-        .load_with(modes::DEFAULT_MODE, true, true, &NoFetch)
+        .load_with(variants::DEFAULT_VARIANT, true, true, &NoFetch)
         .unwrap_err();
     assert_eq!(err.kind(), ErrorKind::Blocked);
     assert!(err.to_string().contains("Minecraft is running"));
@@ -410,7 +410,7 @@ fn a_config_file_the_cli_did_not_write_blocks_unless_it_matches() {
     write(&s.instance(), "config/sub/b.toml", "base b");
     write(&s.instance(), "config/a.toml", "the game's own a");
 
-    let err = s.load(modes::DEFAULT_MODE, false).unwrap_err();
+    let err = s.load(variants::DEFAULT_VARIANT, false).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::Blocked);
     let text = err.to_string();
     assert!(
@@ -422,15 +422,15 @@ fn a_config_file_the_cli_did_not_write_blocks_unless_it_matches() {
     assert_eq!(s.read("config/a.toml"), "the game's own a");
     assert!(s.jars().is_empty());
 
-    let report = s.load(modes::DEFAULT_MODE, true).unwrap();
+    let report = s.load(variants::DEFAULT_VARIANT, true).unwrap();
     assert_eq!(report.forced, ["config/a.toml"]);
     assert_eq!(s.read("config/a.toml"), "base a");
     assert!(s.state().files.contains_key("config/sub/b.toml"));
-    assert!(s.load(modes::DEFAULT_MODE, false).is_ok());
+    assert!(s.load(variants::DEFAULT_VARIANT, false).is_ok());
 }
 
 #[test]
-fn mode_config_overrides_only_the_files_it_has() {
+fn variant_config_overrides_only_the_files_it_has() {
     let s = Setup::new();
     write(&s.instance(), "config/other.toml", "the instance's own");
     let report = s.load("server", false).unwrap();
@@ -443,7 +443,7 @@ fn mode_config_overrides_only_the_files_it_has() {
     assert_eq!(s.read("config/other.toml"), "the instance's own");
     assert!(!s.state().files.contains_key("config/other.toml"));
 
-    s.load(modes::DEFAULT_MODE, false).unwrap();
+    s.load(variants::DEFAULT_VARIANT, false).unwrap();
     assert_eq!(s.read("config/a.toml"), "base a");
 }
 
@@ -458,22 +458,22 @@ fn jar_missing_from_the_repository_is_downloaded_first() {
 
     let fetch = MapFetch::default().with("https://cdn.invalid/c.jar", b"c");
     let report = s
-        .load_with(modes::DEFAULT_MODE, false, false, &fetch)
+        .load_with(variants::DEFAULT_VARIANT, false, false, &fetch)
         .unwrap();
-    assert_eq!(report.downloaded, ["c"], "extra is not in the mode");
+    assert_eq!(report.downloaded, ["c"], "extra is not in the variant");
     assert_eq!(s.read("mods/c-1.0.0.jar"), "c");
     assert!(!s.root().join("mods/extra-1.0.0.jar").exists());
 
     let err = s.load("server", false).unwrap_err();
     assert!(err.to_string().contains("could not be downloaded: extra"));
-    assert_eq!(s.state().mode.as_deref(), Some("default"));
+    assert_eq!(s.state().variant.as_deref(), Some("default"));
 }
 
 #[test]
 fn no_instance_says_to_run_setup() {
     let s = Setup::new();
     Instances::default().save(&s.instances_file()).unwrap();
-    let err = s.load(modes::DEFAULT_MODE, false).unwrap_err();
+    let err = s.load(variants::DEFAULT_VARIANT, false).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::Usage);
     assert!(
         err.to_string()
@@ -483,7 +483,7 @@ fn no_instance_says_to_run_setup() {
 }
 
 #[test]
-fn unknown_mode_is_a_usage_error() {
+fn unknown_variant_is_a_usage_error() {
     let s = Setup::new();
     let err = s.load("lowend", false).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::Usage);
@@ -491,7 +491,7 @@ fn unknown_mode_is_a_usage_error() {
 }
 
 #[test]
-fn unknown_mode_is_reported_before_a_missing_instance() {
+fn unknown_variant_is_reported_before_a_missing_instance() {
     let s = Setup::new();
     Instances::default().save(&s.instances_file()).unwrap();
     let err = s.load("lowend", false).unwrap_err();
@@ -501,9 +501,9 @@ fn unknown_mode_is_reported_before_a_missing_instance() {
 }
 
 #[test]
-fn loaded_mode_reads_the_instance_state() {
+fn loaded_variant_reads_the_instance_state() {
     let s = Setup::new();
-    let loaded = || loaded_mode(s.root(), &s.instances_file()).unwrap();
+    let loaded = || loaded_variant(s.root(), &s.instances_file()).unwrap();
     assert_eq!(loaded(), None);
     s.load("server", false).unwrap();
     assert_eq!(loaded().as_deref(), Some("server"));
@@ -523,7 +523,7 @@ fn a_local_mod_is_copied_from_mods_local_into_the_instance_mods() {
     m.save(&path).unwrap();
     write(s.root(), "mods-local/custom-1.0.0.jar", "custom");
 
-    let report = s.load(modes::DEFAULT_MODE, false).unwrap();
+    let report = s.load(variants::DEFAULT_VARIANT, false).unwrap();
     assert!(
         report.copied.contains(&"mods/custom-1.0.0.jar".to_owned()),
         "{:?}",
@@ -535,7 +535,7 @@ fn a_local_mod_is_copied_from_mods_local_into_the_instance_mods() {
     // Gone from mods-local/, it is not downloaded: git holds it.
     fs::remove_file(s.instance().join("mods/custom-1.0.0.jar")).unwrap();
     fs::remove_file(s.root().join("mods-local/custom-1.0.0.jar")).unwrap();
-    let err = s.load(modes::DEFAULT_MODE, true).unwrap_err();
+    let err = s.load(variants::DEFAULT_VARIANT, true).unwrap_err();
     assert_eq!(err.kind(), crate::error::ErrorKind::Blocked);
     assert!(
         err.to_string()
@@ -552,7 +552,7 @@ fn a_local_mod_is_copied_from_mods_local_into_the_instance_mods() {
 
     // Changed, it is not restored by `modpack install --force` either.
     write(s.root(), "mods-local/custom-1.0.0.jar", "edited");
-    let err = s.load(modes::DEFAULT_MODE, true).unwrap_err();
+    let err = s.load(variants::DEFAULT_VARIANT, true).unwrap_err();
     assert!(
         err.to_string()
             .contains("custom (mods-local/custom-1.0.0.jar), changed"),

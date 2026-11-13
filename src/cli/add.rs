@@ -14,9 +14,9 @@ pub struct Args {
     /// Version of the mod to add
     #[arg(long)]
     pub version: Option<String>,
-    /// Add the mod to this mode only
+    /// Add the mod to this variant only
     #[arg(long)]
-    pub mode: Option<String>,
+    pub variant: Option<String>,
     /// Direct URL of a local jar that no platform hosts
     #[arg(long)]
     pub url: Option<String>,
@@ -41,7 +41,7 @@ pub fn run(args: Args, ctx: &Context) -> Result<()> {
     let req = AddRequest {
         mod_ref: args.mod_ref,
         version: args.version,
-        mode: args.mode,
+        variant: args.variant,
         url: args.url,
         with_deps: args.with_deps,
         force: args.force,

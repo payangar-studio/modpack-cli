@@ -1,11 +1,11 @@
-//! `server-starts`: a dedicated server with the mode's mods reaches `Done`.
+//! `server-starts`: a dedicated server with the variant's mods reaches `Done`.
 //!
 //! The server of the pack's loader and Minecraft version is installed once
 //! into the machine's cache, with the loader's official installer. Each check
 //! then copies it into a temporary directory under the cache (hard links when
-//! the filesystem allows), adds the mode's jars but the client-only ones
+//! the filesystem allows), adds the variant's jars but the client-only ones
 //! (`env.server = "unsupported"`), the base config then the
-//! mode's overrides, accepts the EULA, and starts the server without its
+//! variant's overrides, accepts the EULA, and starts the server without its
 //! interface until the `Done` line of its log.
 
 mod java;
@@ -24,7 +24,7 @@ use serde::de::DeserializeOwned;
 use super::Status;
 use crate::error::{Error, Result};
 use crate::model::manifest::{Manifest, Pack, Support};
-use crate::model::modes::Resolved;
+use crate::model::variants::Resolved;
 use crate::store::{self, download::Fetch};
 use loader::Loader;
 
@@ -69,7 +69,7 @@ impl<'a> Machine<'a> {
 pub fn server_starts(
     root: &Path,
     manifest: &Manifest,
-    mode: &Resolved,
+    variant: &Resolved,
     timeout: Duration,
     machine: &Machine<'_>,
 ) -> Status {
@@ -93,12 +93,12 @@ pub fn server_starts(
     };
     let start = || -> Step<Status> {
         let server = installed(loader, pack, have, machine)?;
-        let run_dir = prepare(root, manifest, mode, &server, machine)?;
+        let run_dir = prepare(root, manifest, variant, &server, machine)?;
         let mut command = Command::new(&machine.java);
         command
             .args(loader.launch_args(pack))
             .current_dir(run_dir.path());
-        tracing::info!(mode = %mode.name, dir = %run_dir.path().display(), "starting the server");
+        tracing::info!(variant = %variant.name, dir = %run_dir.path().display(), "starting the server");
         Ok(run::until_done(command, timeout))
     };
     start().unwrap_or_else(Status::Failed)
@@ -144,18 +144,18 @@ fn installed(loader: Loader, pack: &Pack, java: u32, machine: &Machine<'_>) -> S
     Ok(dir)
 }
 
-/// A temporary server directory for the mode, removed when dropped.
+/// A temporary server directory for the variant, removed when dropped.
 fn prepare(
     root: &Path,
     manifest: &Manifest,
-    mode: &Resolved,
+    variant: &Resolved,
     server: &Path,
     machine: &Machine<'_>,
 ) -> Step<tempfile::TempDir> {
     let runs = machine.cache_dir.join(".runs");
     fs::create_dir_all(&runs).map_err(io_err("creating", &runs))?;
     let run = tempfile::Builder::new()
-        .prefix(&format!("{}-", safe_name(&mode.name)))
+        .prefix(&format!("{}-", safe_name(&variant.name)))
         .tempdir_in(&runs)
         .map_err(io_err("creating a directory in", &runs))?;
     let dir = run.path();
@@ -167,7 +167,7 @@ fn prepare(
     let mut local_missing = Vec::new();
     // A client-only mod is left out, as a server installed from the .mrpack
     // leaves it out.
-    let on_server = mode
+    let on_server = variant
         .keys
         .iter()
         .filter_map(|k| manifest.get(k))
@@ -202,7 +202,7 @@ fn prepare(
 
     for config in [
         root.join("config"),
-        root.join("overrides").join(&mode.name).join("config"),
+        root.join("overrides").join(&variant.name).join("config"),
     ] {
         if config.is_dir() {
             copy_tree(&config, &dir.join("config"), false)?;

@@ -139,7 +139,7 @@ fn setup_registers_the_instance_once() {
         .stdout(predicate::str::contains("1 downloaded"))
         .stdout(predicate::str::contains("confirm the import"))
         .stdout(predicate::str::contains("instance registered"))
-        .stdout(predicate::str::contains("mode `default` loaded into"));
+        .stdout(predicate::str::contains("variant `default` loaded into"));
     jar.assert();
     assert_eq!(world.hooks_path(), ".modpack/hooks");
     assert_eq!(world.launches(), 1);
@@ -157,7 +157,7 @@ fn setup_registers_the_instance_once() {
         .stdout(predicate::str::contains("git hooks already enabled"))
         .stdout(predicate::str::contains("1 present, 0 downloaded"))
         .stdout(predicate::str::contains("instance already registered"))
-        .stdout(predicate::str::contains("mode `default` already loaded"));
+        .stdout(predicate::str::contains("variant `default` already loaded"));
     assert_eq!(
         world.launches(),
         1,

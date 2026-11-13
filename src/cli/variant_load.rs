@@ -1,20 +1,20 @@
-//! `modpack mode load`: loads a mode into the instance.
+//! `modpack variant load`: loads a variant into the instance.
 
 use std::io::Write;
 
 use crate::context::Context;
 use crate::error::Result;
 use crate::launcher::running::Processes;
-use crate::mode::{self, LoadContext};
 use crate::model::instance::Instances;
 use crate::platform::Registry;
 use crate::store::download::{Http, Sources};
+use crate::variant::{self, LoadContext};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// Mode to load
-    pub mode: String,
-    /// Load even if the instance drifted from the last loaded mode
+    /// Variant to load
+    pub variant: String,
+    /// Load even if the instance drifted from the last loaded variant
     #[arg(long)]
     pub force: bool,
 }
@@ -33,7 +33,7 @@ pub fn run(args: Args, ctx: &Context) -> Result<()> {
             fetch: &http,
         },
     };
-    let report = mode::load(&load_ctx, &args.mode, args.force)?;
+    let report = variant::load(&load_ctx, &args.variant, args.force)?;
     write!(std::io::stdout().lock(), "{report}")?;
     Ok(())
 }

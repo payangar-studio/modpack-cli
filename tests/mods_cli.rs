@@ -27,7 +27,7 @@ const MANIFEST: &str = "[pack]\nminecraft = \"1.21.1\"\nloader = \"neoforge\"\nl
     sha1 = \"a9993e364706816aba3e25717850c26c9cd0d89d\"\n\
     sha512 = \"ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f\"\n";
 
-const MODES: &str = "# Hand-written modes.\n[default]\nremove = [\"abc\"]\n\n[modes.extra]\n# Only here.\nadd = [\"abc\"]\n";
+const VARIANTS: &str = "# Hand-written variants.\n[default]\nremove = [\"abc\"]\n\n[variants.extra]\n# Only here.\nadd = [\"abc\"]\n";
 
 /// A repository whose manifest lists `abc`, with its jar in mods/.
 fn repo() -> tempfile::TempDir {
@@ -35,19 +35,19 @@ fn repo() -> tempfile::TempDir {
     fs::create_dir_all(repo.path().join(".modpack")).unwrap();
     fs::write(repo.path().join(".modpack/socle.toml"), SOCLE).unwrap();
     fs::write(repo.path().join("mods.lock.toml"), MANIFEST).unwrap();
-    fs::write(repo.path().join("modes.toml"), MODES).unwrap();
+    fs::write(repo.path().join("variants.toml"), VARIANTS).unwrap();
     fs::create_dir_all(repo.path().join("mods")).unwrap();
     fs::write(repo.path().join("mods/abc.jar"), b"abc").unwrap();
     repo
 }
 
 #[test]
-fn manifest_stops_on_modes_that_do_not_match_it() {
+fn manifest_stops_on_variants_that_do_not_match_it() {
     let repo = repo();
     let home = tempfile::tempdir().unwrap();
     fs::write(
-        repo.path().join("modes.toml"),
-        "[modes.extra]\nadd = [\"ghost\"]\n",
+        repo.path().join("variants.toml"),
+        "[variants.extra]\nadd = [\"ghost\"]\n",
     )
     .unwrap();
     for args in [&["manifest"][..], &["manifest", "--check"][..]] {
@@ -56,12 +56,12 @@ fn manifest_stops_on_modes_that_do_not_match_it() {
             .assert()
             .code(2)
             .stderr(predicate::str::contains(
-                "modes.toml: inconsistent with mods.lock.toml:\n  - mode `extra` names `ghost`",
+                "variants.toml: inconsistent with mods.lock.toml:\n  - variant `extra` names `ghost`",
             ));
     }
 
     fs::write(
-        repo.path().join("modes.toml"),
+        repo.path().join("variants.toml"),
         "[conditions]\nfast = true\n",
     )
     .unwrap();
@@ -97,7 +97,7 @@ fn manifest_check_passes_when_up_to_date_and_fails_on_a_jar_added_by_hand() {
 }
 
 #[test]
-fn remove_cleans_the_manifest_mods_and_modes() {
+fn remove_cleans_the_manifest_mods_and_variants() {
     let repo = repo();
     let home = tempfile::tempdir().unwrap();
     modpack(repo.path(), home.path())
@@ -109,8 +109,8 @@ fn remove_cleans_the_manifest_mods_and_modes() {
     let manifest = fs::read_to_string(repo.path().join("mods.lock.toml")).unwrap();
     assert!(!manifest.contains("abc"), "{manifest}");
     assert_eq!(
-        fs::read_to_string(repo.path().join("modes.toml")).unwrap(),
-        "# Hand-written modes.\n[default]\nremove = []\n\n[modes.extra]\n# Only here.\nadd = []\n"
+        fs::read_to_string(repo.path().join("variants.toml")).unwrap(),
+        "# Hand-written variants.\n[default]\nremove = []\n\n[variants.extra]\n# Only here.\nadd = []\n"
     );
     modpack(repo.path(), home.path())
         .args(["manifest", "--check"])
@@ -158,8 +158,8 @@ fn manifest_keeps_the_entry_of_a_missing_jar() {
         MANIFEST
     );
     assert_eq!(
-        fs::read_to_string(repo.path().join("modes.toml")).unwrap(),
-        MODES
+        fs::read_to_string(repo.path().join("variants.toml")).unwrap(),
+        VARIANTS
     );
     modpack(repo.path(), home.path())
         .args(["manifest", "--check"])
@@ -168,7 +168,7 @@ fn manifest_keeps_the_entry_of_a_missing_jar() {
 }
 
 #[test]
-fn remove_of_a_mod_whose_jar_is_missing_cleans_the_manifest_and_modes() {
+fn remove_of_a_mod_whose_jar_is_missing_cleans_the_manifest_and_variants() {
     let repo = repo();
     let home = tempfile::tempdir().unwrap();
     fs::remove_file(repo.path().join("mods/abc.jar")).unwrap();
@@ -176,11 +176,11 @@ fn remove_of_a_mod_whose_jar_is_missing_cleans_the_manifest_and_modes() {
         .args(["remove", "abc"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("removed `abc` from the modes"));
+        .stdout(predicate::str::contains("removed `abc` from the variants"));
     let manifest = fs::read_to_string(repo.path().join("mods.lock.toml")).unwrap();
     assert!(!manifest.contains("abc"), "{manifest}");
     assert!(
-        !fs::read_to_string(repo.path().join("modes.toml"))
+        !fs::read_to_string(repo.path().join("variants.toml"))
             .unwrap()
             .contains("abc")
     );
@@ -198,12 +198,12 @@ fn remove_of_an_unknown_key_is_a_usage_error() {
 }
 
 #[test]
-fn add_to_an_unknown_mode_is_refused_offline() {
+fn add_to_an_unknown_variant_is_refused_offline() {
     let repo = repo();
     let home = tempfile::tempdir().unwrap();
     modpack(repo.path(), home.path())
-        .args(["add", "sodium", "--mode", "lowend"])
+        .args(["add", "sodium", "--variant", "lowend"])
         .assert()
         .code(2)
-        .stderr(predicate::str::contains("unknown mode `lowend`"));
+        .stderr(predicate::str::contains("unknown variant `lowend`"));
 }

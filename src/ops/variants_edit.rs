@@ -1,4 +1,4 @@
-//! Writing `modes.toml`. The file is written by hand: edits go through
+//! Writing `variants.toml`. The file is written by hand: edits go through
 //! `toml_edit`, which keeps its comments and layout.
 
 use std::io::Write;
@@ -7,58 +7,58 @@ use std::path::Path;
 use toml_edit::{Array, DocumentMut, Item, TableLike, Value};
 
 use crate::error::{Context, Error, Result};
-use crate::model::modes::{self, DEFAULT_MODE};
+use crate::model::variants::{self, DEFAULT_VARIANT};
 
-const HINT: &str = "fix modes.toml";
+const HINT: &str = "fix variants.toml";
 
-/// Removes `key` from the `remove` of the default mode and from the `add` and
-/// `remove` of every mode. Returns whether the text changed.
+/// Removes `key` from the `remove` of the default variant and from the `add` and
+/// `remove` of every variant. Returns whether the text changed.
 pub fn remove_key(doc: &mut DocumentMut, key: &str) -> bool {
     let mut changed = false;
     if let Some(default) = doc.get_mut("default").and_then(Item::as_table_like_mut) {
         changed |= drop_value(default, "remove", key);
     }
-    if let Some(all) = doc.get_mut("modes").and_then(Item::as_table_like_mut) {
-        for (_, mode) in all.iter_mut() {
-            if let Some(mode) = mode.as_table_like_mut() {
-                changed |= drop_value(mode, "add", key);
-                changed |= drop_value(mode, "remove", key);
+    if let Some(all) = doc.get_mut("variants").and_then(Item::as_table_like_mut) {
+        for (_, variant) in all.iter_mut() {
+            if let Some(variant) = variant.as_table_like_mut() {
+                changed |= drop_value(variant, "add", key);
+                changed |= drop_value(variant, "remove", key);
             }
         }
     }
     changed
 }
 
-/// Makes `key` a mod of `mode` only: removed by the default mode, added by
-/// `mode`. `mode` must already exist.
-pub fn move_to_mode(doc: &mut DocumentMut, key: &str, mode: &str) -> Result<()> {
+/// Makes `key` a mod of `variant` only: removed by the default variant, added by
+/// `variant`. `variant` must already exist.
+pub fn move_to_variant(doc: &mut DocumentMut, key: &str, variant: &str) -> Result<()> {
     let target = doc
-        .get_mut("modes")
+        .get_mut("variants")
         .and_then(Item::as_table_like_mut)
-        .and_then(|all| all.get_mut(mode))
+        .and_then(|all| all.get_mut(variant))
         .and_then(Item::as_table_like_mut)
-        .ok_or_else(|| unknown_mode(mode))?;
+        .ok_or_else(|| unknown_variant(variant))?;
     push_value(target, "add", key)?;
     let default = doc
         .entry("default")
         .or_insert_with(toml_edit::table)
         .as_table_like_mut()
-        .ok_or_else(|| Error::usage("modes.toml: `default` is not a table", HINT))?;
+        .ok_or_else(|| Error::usage("variants.toml: `default` is not a table", HINT))?;
     push_value(default, "remove", key)
 }
 
-/// Loads `<root>/modes.toml`, applies `edit`, and writes the file back if the
+/// Loads `<root>/variants.toml`, applies `edit`, and writes the file back if the
 /// text changed. A missing file is an empty one, written only if `edit`
 /// changes it.
 pub fn edit<T>(root: &Path, edit: impl FnOnce(&mut DocumentMut) -> Result<T>) -> Result<T> {
-    let path = root.join(modes::FILE_NAME);
+    let path = root.join(variants::FILE_NAME);
     let before = match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e).context(format!("reading {}", path.display())),
     };
     let mut doc: DocumentMut = before.parse().map_err(|e: toml_edit::TomlError| {
-        Error::usage(format!("modes.toml is invalid: {}", e.message()), HINT).with_source(e)
+        Error::usage(format!("variants.toml is invalid: {}", e.message()), HINT).with_source(e)
     })?;
     let result = edit(&mut doc)?;
     let after = doc.to_string();
@@ -68,30 +68,30 @@ pub fn edit<T>(root: &Path, edit: impl FnOnce(&mut DocumentMut) -> Result<T>) ->
     Ok(result)
 }
 
-/// The names of the modes `modes.toml` defines, the default one first.
-pub fn mode_names(root: &Path) -> Result<Vec<String>> {
-    let path = root.join(modes::FILE_NAME);
-    let modes = if path.is_file() {
-        modes::Modes::load(&path)?
+/// The names of the variants `variants.toml` defines, the default one first.
+pub fn variant_names(root: &Path) -> Result<Vec<String>> {
+    let path = root.join(variants::FILE_NAME);
+    let variants = if path.is_file() {
+        variants::Variants::load(&path)?
     } else {
-        modes::Modes::parse("")?
+        variants::Variants::parse("")?
     };
-    Ok(modes.names().into_iter().map(str::to_owned).collect())
+    Ok(variants.names().into_iter().map(str::to_owned).collect())
 }
 
-/// Fails unless `mode` is a mode of `modes.toml` other than the default one.
-pub fn require_mode(root: &Path, mode: &str) -> Result<()> {
-    let names = mode_names(root)?;
-    if mode != DEFAULT_MODE && names.iter().any(|n| n == mode) {
+/// Fails unless `variant` is a variant of `variants.toml` other than the default one.
+pub fn require_variant(root: &Path, variant: &str) -> Result<()> {
+    let names = variant_names(root)?;
+    if variant != DEFAULT_VARIANT && names.iter().any(|n| n == variant) {
         return Ok(());
     }
     Err(Error::usage(
-        format!("unknown mode `{mode}`"),
+        format!("unknown variant `{variant}`"),
         format!(
-            "use one of: {} (declare a new mode in modes.toml first)",
+            "use one of: {} (declare a new variant in variants.toml first)",
             names
                 .iter()
-                .filter(|n| *n != DEFAULT_MODE)
+                .filter(|n| *n != DEFAULT_VARIANT)
                 .cloned()
                 .collect::<Vec<_>>()
                 .join(", ")
@@ -99,10 +99,10 @@ pub fn require_mode(root: &Path, mode: &str) -> Result<()> {
     ))
 }
 
-fn unknown_mode(mode: &str) -> Error {
+fn unknown_variant(variant: &str) -> Error {
     Error::usage(
-        format!("modes.toml has no mode `{mode}`"),
-        "declare it as [modes.<name>] in modes.toml first",
+        format!("variants.toml has no variant `{variant}`"),
+        "declare it as [variants.<name>] in variants.toml first",
     )
 }
 
@@ -133,7 +133,7 @@ fn push_value(table: &mut dyn TableLike, field: &str, key: &str) -> Result<()> {
     let array = table
         .get_mut(field)
         .and_then(Item::as_array_mut)
-        .ok_or_else(|| Error::usage(format!("modes.toml: `{field}` is not a list"), HINT))?;
+        .ok_or_else(|| Error::usage(format!("variants.toml: `{field}` is not a list"), HINT))?;
     if !array.iter().any(|v| v.as_str() == Some(key)) {
         array.push(key);
     }
@@ -157,7 +157,7 @@ mod tests {
     use super::*;
 
     fn fixture() -> String {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/repo/modes.toml");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/repo/variants.toml");
         std::fs::read_to_string(path).unwrap()
     }
 
@@ -178,7 +178,7 @@ mod tests {
                 "remove = [\"iris\", \"jei\"]"
             )
         );
-        assert!(after.contains("# Global conditions: every mode, the default one included."));
+        assert!(after.contains("# Global conditions: every variant, the default one included."));
     }
 
     #[test]
@@ -189,7 +189,7 @@ mod tests {
         assert!(!after.contains("hardcore-tweaks"), "{after}");
         assert!(after.contains("[default]\ndescription = \"Full pack\"\nremove = []\n"));
         assert!(after.contains("description = \"Hardcore\"\nadd = []\n"));
-        modes::Modes::parse(&after).unwrap();
+        variants::Variants::parse(&after).unwrap();
     }
 
     #[test]
@@ -201,17 +201,17 @@ mod tests {
     }
 
     #[test]
-    fn last_element_and_inline_modes() {
-        let mut doc = doc("modes = { a = { remove = [\"x\", \"y\"] } }\n");
+    fn last_element_and_inline_variants() {
+        let mut doc = doc("variants = { a = { remove = [\"x\", \"y\"] } }\n");
         assert!(remove_key(&mut doc, "y"));
-        assert_eq!(doc.to_string(), "modes = { a = { remove = [\"x\"] } }\n");
+        assert_eq!(doc.to_string(), "variants = { a = { remove = [\"x\"] } }\n");
     }
 
     #[test]
-    fn moving_to_a_mode_updates_both_lists() {
+    fn moving_to_a_variant_updates_both_lists() {
         let before = fixture();
         let mut doc = doc(&before);
-        move_to_mode(&mut doc, "sodium", "hardcore").unwrap();
+        move_to_variant(&mut doc, "sodium", "hardcore").unwrap();
         let after = doc.to_string();
         assert!(
             after.contains("remove = [\"hardcore-tweaks\", \"sodium\"]"),
@@ -221,51 +221,52 @@ mod tests {
             after.contains("add = [\"hardcore-tweaks\", \"sodium\"]"),
             "{after}"
         );
-        assert!(after.starts_with("# Modes of the fixture pack."));
+        assert!(after.starts_with("# Variants of the fixture pack."));
         // Idempotent.
-        move_to_mode(&mut doc, "sodium", "hardcore").unwrap();
+        move_to_variant(&mut doc, "sodium", "hardcore").unwrap();
         assert_eq!(doc.to_string(), after);
     }
 
     #[test]
     fn moving_creates_missing_lists() {
-        let mut doc = doc("# pack modes\n[default]\ndescription = \"Full\"\n\n[modes.server]\n");
-        move_to_mode(&mut doc, "jei", "server").unwrap();
+        let mut doc =
+            doc("# pack variants\n[default]\ndescription = \"Full\"\n\n[variants.server]\n");
+        move_to_variant(&mut doc, "jei", "server").unwrap();
         assert_eq!(
             doc.to_string(),
-            "# pack modes\n[default]\ndescription = \"Full\"\nremove = [\"jei\"]\n\n[modes.server]\nadd = [\"jei\"]\n"
+            "# pack variants\n[default]\ndescription = \"Full\"\nremove = [\"jei\"]\n\n[variants.server]\nadd = [\"jei\"]\n"
         );
-        let mut doc = self::doc("[modes.server]\n");
-        move_to_mode(&mut doc, "jei", "server").unwrap();
-        let parsed = modes::Modes::parse(&doc.to_string()).unwrap();
+        let mut doc = self::doc("[variants.server]\n");
+        move_to_variant(&mut doc, "jei", "server").unwrap();
+        let parsed = variants::Variants::parse(&doc.to_string()).unwrap();
         assert_eq!(parsed.default.remove, ["jei"]);
     }
 
     #[test]
-    fn moving_to_an_unknown_mode_fails() {
+    fn moving_to_an_unknown_variant_fails() {
         let mut doc = doc(&fixture());
-        let err = move_to_mode(&mut doc, "jei", "lowend").unwrap_err();
-        assert!(err.to_string().contains("no mode `lowend`"));
+        let err = move_to_variant(&mut doc, "jei", "lowend").unwrap_err();
+        assert!(err.to_string().contains("no variant `lowend`"));
     }
 
     #[test]
     fn edit_writes_only_on_change() {
         let root = tempfile::tempdir().unwrap();
         edit(root.path(), |doc| Ok(remove_key(doc, "x"))).unwrap();
-        assert!(!root.path().join(modes::FILE_NAME).exists());
-        std::fs::write(root.path().join(modes::FILE_NAME), fixture()).unwrap();
+        assert!(!root.path().join(variants::FILE_NAME).exists());
+        std::fs::write(root.path().join(variants::FILE_NAME), fixture()).unwrap();
         assert!(edit(root.path(), |doc| Ok(remove_key(doc, "jei"))).unwrap());
-        let text = std::fs::read_to_string(root.path().join(modes::FILE_NAME)).unwrap();
+        let text = std::fs::read_to_string(root.path().join(variants::FILE_NAME)).unwrap();
         assert!(text.contains("remove = [\"sodium\", \"iris\"]"));
     }
 
     #[test]
-    fn require_mode_lists_the_known_modes() {
+    fn require_variant_lists_the_known_variants() {
         let root = tempfile::tempdir().unwrap();
-        std::fs::write(root.path().join(modes::FILE_NAME), fixture()).unwrap();
-        require_mode(root.path(), "server").unwrap();
-        let err = require_mode(root.path(), "lowend").unwrap_err();
+        std::fs::write(root.path().join(variants::FILE_NAME), fixture()).unwrap();
+        require_variant(root.path(), "server").unwrap();
+        let err = require_variant(root.path(), "lowend").unwrap_err();
         assert!(err.hint().contains("hardcore, server"));
-        assert!(require_mode(root.path(), DEFAULT_MODE).is_err());
+        assert!(require_variant(root.path(), DEFAULT_VARIANT).is_err());
     }
 }

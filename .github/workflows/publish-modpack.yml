@@ -18,8 +18,8 @@ on:
         description: Release of modpack-cli to run (v0.1.0), or `latest`
         type: string
         default: latest
-      modes:
-        description: Modes to publish, separated by spaces; empty for all
+      variants:
+        description: Variants to publish, separated by spaces; empty for all
         type: string
         default: ""
       platforms:
@@ -58,8 +58,8 @@ env:
   VAULT_ENVIRONMENT: prod
   VAULT_PATH: /app
   USER_AGENT: payangar-studio/modpack-cli publish-workflow
-  # The artifacts of `$platform`, as mode and path, the default mode last.
-  ARTIFACTS: '[.artifacts[] | select(.platform == $platform)] | sort_by(.mode == "default") | .[] | [.mode, .path] | @tsv'
+  # The artifacts of `$platform`, as variant and path, the default variant last.
+  ARTIFACTS: '[.artifacts[] | select(.platform == $platform)] | sort_by(.variant == "default") | .[] | [.variant, .path] | @tsv'
 
 jobs:
   publish:
@@ -233,24 +233,24 @@ jobs:
       - name: Build the packs
         id: pack
         env:
-          MODES: ${{ inputs.modes }}
+          VARIANTS: ${{ inputs.variants }}
         run: |
-          read -ra modes <<<"$MODES"
+          read -ra variants <<<"$VARIANTS"
           read -ra platforms <<<"$PUBLISH_PLATFORMS"
           # Both platforms are what `pack` builds when given none.
           platform_arg=()
           if [[ ${#platforms[@]} -eq 1 ]]; then platform_arg=(--platform "${platforms[0]}"); fi
-          [[ ${#modes[@]} -gt 0 ]] || modes=("")
+          [[ ${#variants[@]} -gt 0 ]] || variants=("")
           reports=()
-          for mode in "${modes[@]}"; do
+          for variant in "${variants[@]}"; do
             report="$RUNNER_TEMP/pack-report-${#reports[@]}.json"
-            # A platform blocked for a mode exits non-zero but still reports
+            # A platform blocked for a variant exits non-zero but still reports
             # what was built: the other packs are published, the job fails at
             # the end.
-            modpack pack ${mode:+"$mode"} "${platform_arg[@]}" --out "$RUNNER_TEMP/dist" \
+            modpack pack ${variant:+"$variant"} "${platform_arg[@]}" --out "$RUNNER_TEMP/dist" \
               --pack-version "$VERSION" --json > "$report" || true
             if ! jq -e .artifacts "$report" > /dev/null 2>&1; then
-              echo "::error::modpack pack ${mode:-(all modes)} built nothing, see its error above."
+              echo "::error::modpack pack ${variant:-(all variants)} built nothing, see its error above."
               exit 1
             fi
             reports+=("$report")
@@ -258,7 +258,7 @@ jobs:
           jq -s '{artifacts: (map(.artifacts) | add), blocked: (map(.blocked) | add),
             warnings: (map(.warnings // []) | add | unique)}' "${reports[@]}" \
             > "$RUNNER_TEMP/pack-report.json"
-          jq -r '.artifacts[] | "Built \(.path) (\(.platform), mode \(.mode))."' "$RUNNER_TEMP/pack-report.json"
+          jq -r '.artifacts[] | "Built \(.path) (\(.platform), variant \(.variant))."' "$RUNNER_TEMP/pack-report.json"
           jq -r '.warnings[] | "::warning::\(.)"' "$RUNNER_TEMP/pack-report.json"
 
           # Changelog: changelogs/<version>.md, else the tag's message.
@@ -299,11 +299,11 @@ jobs:
             exit 1
           fi
           failed=0
-          while IFS=$'\t' read -r mode path; do
-            # The default mode is the pack itself; another mode is told apart
+          while IFS=$'\t' read -r variant path; do
+            # The default variant is the pack itself; another variant is told apart
             # by its name.
             number="$VERSION" name="$PACK_NAME $VERSION"
-            if [[ "$mode" != default ]]; then number="$VERSION+$mode" name="$name ($mode)"; fi
+            if [[ "$variant" != default ]]; then number="$VERSION+$variant" name="$name ($variant)"; fi
             data="$RUNNER_TEMP/modrinth-data.json"
             jq -n --arg project "$project" --arg name "$name" --arg number "$number" \
               --rawfile changelog "$RUNNER_TEMP/changelog.md" --arg type "$RELEASE_TYPE" \
@@ -318,11 +318,11 @@ jobs:
             else
               echo "::error::Modrinth refused $(basename "$path"): $(cat "$RUNNER_TEMP/modrinth-response.json" 2>/dev/null)"
               failed=1
-              if [[ "$mode" == default ]]; then
-                echo "- Modrinth: the default mode was not published, the other modes published before it are now the newest versions; once fixed, publish it alone by running the workflow by hand from the tag with modes \`default\`." >> "$GITHUB_STEP_SUMMARY"
+              if [[ "$variant" == default ]]; then
+                echo "- Modrinth: the default variant was not published, the other variants published before it are now the newest versions; once fixed, publish it alone by running the workflow by hand from the tag with variants \`default\`." >> "$GITHUB_STEP_SUMMARY"
               fi
             fi
-          # The default mode last, so that its version is always the newest.
+          # The default variant last, so that its version is always the newest.
           done < <(jq -r --arg platform modrinth "$ARTIFACTS" "$RUNNER_TEMP/pack-report.json")
           exit "$failed"
 
@@ -335,9 +335,9 @@ jobs:
             exit 1
           fi
           failed=0
-          while IFS=$'\t' read -r mode path; do
+          while IFS=$'\t' read -r variant path; do
             name="$PACK_NAME $VERSION"
-            if [[ "$mode" != default ]]; then name="$name ($mode)"; fi
+            if [[ "$variant" != default ]]; then name="$name ($variant)"; fi
             # No gameVersions: CurseForge reads them from the pack's manifest.json.
             metadata="$RUNNER_TEMP/curseforge-metadata.json"
             jq -n --arg name "$name" --rawfile changelog "$RUNNER_TEMP/changelog.md" --arg type "$RELEASE_TYPE" \
@@ -350,19 +350,19 @@ jobs:
             else
               echo "::error::CurseForge refused $(basename "$path"): $(cat "$RUNNER_TEMP/curseforge-response.json" 2>/dev/null)"
               failed=1
-              if [[ "$mode" == default ]]; then
-                echo "- CurseForge: the default mode was not published, the other modes published before it are now the newest files; once fixed, publish it alone by running the workflow by hand from the tag with modes \`default\`." >> "$GITHUB_STEP_SUMMARY"
+              if [[ "$variant" == default ]]; then
+                echo "- CurseForge: the default variant was not published, the other variants published before it are now the newest files; once fixed, publish it alone by running the workflow by hand from the tag with variants \`default\`." >> "$GITHUB_STEP_SUMMARY"
               fi
             fi
-          # The default mode last, so that its file is always the newest.
+          # The default variant last, so that its file is always the newest.
           done < <(jq -r --arg platform curseforge "$ARTIFACTS" "$RUNNER_TEMP/pack-report.json")
           exit "$failed"
 
       - name: Report the packs that could not be built
         if: ${{ !cancelled() && steps.pack.outcome == 'success' }}
         run: |
-          blocked=$(jq -r '.blocked[] | "\(.platform) pack of mode \(.mode): \(.mods | map(.key) | join(", "))"' "$RUNNER_TEMP/pack-report.json")
+          blocked=$(jq -r '.blocked[] | "\(.platform) pack of variant \(.variant): \(.mods | map(.key) | join(", "))"' "$RUNNER_TEMP/pack-report.json")
           if [[ -n "$blocked" ]]; then
-            while read -r line; do echo "::error::Not built, $line. Leave these mods out of the mode in modes.toml."; done <<<"$blocked"
+            while read -r line; do echo "::error::Not built, $line. Leave these mods out of the variant in variants.toml."; done <<<"$blocked"
             exit 1
           fi

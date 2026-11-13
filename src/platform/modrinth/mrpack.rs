@@ -73,7 +73,7 @@ fn index(build: &PackBuild<'_>) -> Result<Value> {
                 blocked.join(", ")
             ),
             format!(
-                "a .mrpack only downloads from {}; embed the jar with its author's permission, or leave the mod out of the mode",
+                "a .mrpack only downloads from {}; embed the jar with its author's permission, or leave the mod out of the variant",
                 ALLOWED_HOSTS.join(", ")
             ),
         ));
@@ -188,9 +188,9 @@ mod tests {
         let manifest = fixture();
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path().join("base.toml");
-        let mode = dir.path().join("mode.toml");
+        let variant = dir.path().join("variant.toml");
         fs::write(&base, "base").unwrap();
-        fs::write(&mode, "mode").unwrap();
+        fs::write(&variant, "variant").unwrap();
         let mods: Vec<&Entry> = manifest
             .mods
             .iter()
@@ -207,7 +207,7 @@ mod tests {
                     path: "config/a.toml".into(),
                 },
                 Override {
-                    source: mode,
+                    source: variant,
                     path: "config/a.toml".into(),
                 },
             ],
@@ -253,7 +253,10 @@ mod tests {
             .unwrap()
             .read_to_string(&mut text)
             .unwrap();
-        assert_eq!(text, "mode", "the mode override replaces the base config");
+        assert_eq!(
+            text, "variant",
+            "the variant override replaces the base config"
+        );
         assert_eq!(zip.len(), 2);
     }
 

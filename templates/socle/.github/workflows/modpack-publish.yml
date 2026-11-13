@@ -7,8 +7,8 @@
 # Repository variables (Settings, Secrets and variables, Actions, Variables):
 # - INFISICAL_URL: URL of the vault;
 # - INFISICAL_IDENTITY_ID: id of the vault identity `ci-minecraft`;
-# - MODPACK_PUBLISH_MODES (optional): modes to publish, separated by spaces;
-#   all modes when unset.
+# - MODPACK_PUBLISH_VARIANTS (optional): variants to publish, separated by spaces;
+#   all variants when unset.
 
 name: Publish
 
@@ -22,8 +22,8 @@ on:
         type: choice
         options: ["modrinth curseforge", "modrinth", "curseforge"]
         default: "modrinth curseforge"
-      modes:
-        description: Modes to publish, separated by spaces (empty for MODPACK_PUBLISH_MODES, else all)
+      variants:
+        description: Variants to publish, separated by spaces (empty for MODPACK_PUBLISH_VARIANTS, else all)
         type: string
         default: ""
       dry-run:
@@ -42,7 +42,7 @@ jobs:
     with:
       modpack-version: v0.2.0
       platforms: ${{ inputs.platforms || 'modrinth curseforge' }}
-      modes: ${{ inputs.modes || vars.MODPACK_PUBLISH_MODES }}
+      variants: ${{ inputs.variants || vars.MODPACK_PUBLISH_VARIANTS }}
       dry-run: ${{ inputs.dry-run == true }}
       vault-url: ${{ vars.INFISICAL_URL }}
       identity-id: ${{ vars.INFISICAL_IDENTITY_ID }}

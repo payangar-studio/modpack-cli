@@ -1,6 +1,6 @@
 #!/bin/sh
 # Managed by modpack-cli; `modpack update` rewrites this file.
-# After a branch change: downloads the missing jars and reloads the mode loaded
+# After a branch change: downloads the missing jars and reloads the variant loaded
 # in the pack's instance. The third argument is 1 for a branch change, 0 for a
 # checkout of files, which is left alone.
 

@@ -8,12 +8,12 @@ The design lives in `payangar-studio/environment`, branch `design`, files 00-cad
 - `src/main.rs`: entry point. Parses the command line, sets up logs, builds the context, calls `cli::run`, maps errors to exit codes.
 - `src/lib.rs`: module registry, one `pub mod` line per module.
 - `src/cli/mod.rs`: the clap command tree and the dispatch to handlers.
-- `src/cli/<command>.rs`: one file per command (`mode load` is `src/cli/mode_load.rs`), holding its `Args` and its `run(args, ctx)` handler.
+- `src/cli/<command>.rs`: one file per command (`variant load` is `src/cli/variant_load.rs`), holding its `Args` and its `run(args, ctx)` handler.
 - `src/prompt.rs`: "ask, or read the argument". Every value a command needs goes through it, so that every command can run without a terminal.
 - `src/error.rs`: error model. Every error says what happened and what to do. Exit codes: 0 success, 1 internal error, 2 usage error (missing argument), 3 blocked (drift or file edited by hand, overridable with `--force`; also a failed `modpack test` condition or a platform `modpack pack` cannot build for).
 - `src/context.rs`: context passed to handlers (repository root found by walking up to `.modpack/`, prompt, verbosity).
 - `src/socle/`: what `modpack init` lays down and `modpack update` rewrites, the block markers, and the socle version check that `Context::require_root` runs for every command working in a repository.
-- `src/conditions/`: the checks behind `modpack test`. Static ones read the manifest; `server-starts` installs the loader's server once into the machine cache (`<cache dir>/modpack/servers`), then starts it with the mode's jars and config until `Done`.
+- `src/conditions/`: the checks behind `modpack test`. Static ones read the manifest; `server-starts` installs the loader's server once into the machine cache (`<cache dir>/modpack/servers`), then starts it with the variant's jars and config until `Done`.
 - `templates/`: templates embedded in the binary. `socle/`: files the socle owns, at their path in the pack repository, rewritten by `update`. `blocks/`: blocks between markers in `AGENTS.md` and `.gitignore`. `project/`: the pack skeleton, written once by `init`. Adding a file to `socle/` or `project/` needs no code change; each issue adds its templates under its own path.
 - `tests/`: integration tests of the binary; `tests/fixtures/`: their fixtures.
 

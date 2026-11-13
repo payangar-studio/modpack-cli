@@ -209,7 +209,7 @@ fn artifacts_filter() -> String {
 }
 
 #[test]
-fn the_default_mode_is_published_last_on_each_platform() {
+fn the_default_variant_is_published_last_on_each_platform() {
     for (step, platform) in [
         ("Publish to Modrinth", "modrinth"),
         ("Publish to CurseForge", "curseforge"),
@@ -220,16 +220,16 @@ fn the_default_mode_is_published_last_on_each_platform() {
             "{step} does not read its artifacts through $ARTIFACTS"
         );
         assert!(
-            script.contains("the default mode was not published"),
+            script.contains("the default variant was not published"),
             "{step}"
         );
     }
 
     let report = r#"{"artifacts": [
-        {"mode": "default", "platform": "modrinth", "path": "d.mrpack"},
-        {"mode": "server", "platform": "modrinth", "path": "s.mrpack"},
-        {"mode": "default", "platform": "curseforge", "path": "d.zip"},
-        {"mode": "lite", "platform": "modrinth", "path": "l.mrpack"}
+        {"variant": "default", "platform": "modrinth", "path": "d.mrpack"},
+        {"variant": "server", "platform": "modrinth", "path": "s.mrpack"},
+        {"variant": "default", "platform": "curseforge", "path": "d.zip"},
+        {"variant": "lite", "platform": "modrinth", "path": "l.mrpack"}
     ]}"#;
     let output = Process::new("jq")
         .args(["-r", "--arg", "platform", "modrinth", &artifacts_filter()])
@@ -338,12 +338,12 @@ fn the_build_step_merges_the_reports_and_their_warnings() {
     let b = dir.path().join("b.json");
     fs::write(
         &a,
-        r#"{"artifacts": [{"mode": "default"}], "blocked": [], "warnings": ["w1", "w2"]}"#,
+        r#"{"artifacts": [{"variant": "default"}], "blocked": [], "warnings": ["w1", "w2"]}"#,
     )
     .unwrap();
     fs::write(
         &b,
-        r#"{"artifacts": [{"mode": "server"}], "blocked": [], "warnings": ["w1"]}"#,
+        r#"{"artifacts": [{"variant": "server"}], "blocked": [], "warnings": ["w1"]}"#,
     )
     .unwrap();
     let out = Process::new("jq")
@@ -355,7 +355,7 @@ fn the_build_step_merges_the_reports_and_their_warnings() {
     assert!(out.status.success(), "{out:?}");
     assert_eq!(
         String::from_utf8(out.stdout).unwrap(),
-        "{\"artifacts\":[{\"mode\":\"default\"},{\"mode\":\"server\"}],\"blocked\":[],\"warnings\":[\"w1\",\"w2\"]}\n"
+        "{\"artifacts\":[{\"variant\":\"default\"},{\"variant\":\"server\"}],\"blocked\":[],\"warnings\":[\"w1\",\"w2\"]}\n"
     );
     assert!(script.contains(r#"jq -r '.warnings[] | "::warning::\(.)"'"#));
 }

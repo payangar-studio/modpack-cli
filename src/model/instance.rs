@@ -70,14 +70,14 @@ impl Instances {
     }
 }
 
-/// `.modpack-state.toml` of an instance: the loaded mode and the sha256 of
+/// `.modpack-state.toml` of an instance: the loaded variant and the sha256 of
 /// every file the CLI wrote there, the reference of drift detection.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InstanceState {
-    /// Mode loaded last; `None` before the first load.
+    /// Variant loaded last; `None` before the first load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mode: Option<String>,
+    pub variant: Option<String>,
     /// Path relative to the instance directory, with `/` separators, to sha256.
     #[serde(default)]
     pub files: BTreeMap<String, String>,
@@ -94,7 +94,7 @@ impl InstanceState {
         super::parse_toml(
             &super::read_file(&path)?,
             &path.display().to_string(),
-            "delete the file, then load a mode with `modpack mode load <mode> --force`",
+            "delete the file, then load a variant with `modpack variant load <variant> --force`",
         )
     }
 
@@ -175,7 +175,7 @@ mod tests {
         fs::write(dir.path().join("mods/jei.jar"), b"jar").unwrap();
         fs::write(dir.path().join("config/jei.toml"), b"a = 1").unwrap();
         let mut state = InstanceState {
-            mode: Some("default".into()),
+            variant: Some("default".into()),
             ..Default::default()
         };
         state.record(dir.path(), "mods/jei.jar").unwrap();
@@ -249,7 +249,7 @@ mod tests {
         state.save(dir.path()).unwrap();
         assert_eq!(InstanceState::load(dir.path()).unwrap(), state);
         let text = fs::read_to_string(dir.path().join(STATE_FILE)).unwrap();
-        assert!(text.contains("mode = \"default\""));
+        assert!(text.contains("variant = \"default\""));
         assert!(text.contains("\"mods/jei.jar\" = "));
     }
 

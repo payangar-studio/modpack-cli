@@ -164,6 +164,24 @@ pub fn check_approved(root: &Path, out: &mut dyn Write) -> Result<()> {
     ))
 }
 
+/// Whether git holds the jar of a local mod as committed: tracked, and the
+/// same in the working tree, the index and `HEAD`. Outside a git repository,
+/// or when git cannot run, it is not.
+pub fn jar_committed(root: &Path, entry: &Entry) -> bool {
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| o.stdout)
+    };
+    git(&["ls-files", "--error-unmatch", "--", &entry.path]).is_some()
+        && git(&["status", "--porcelain", "--", &entry.path]).is_some_and(|o| o.is_empty())
+}
+
 /// Removes the jar of a local mod from the working tree and from git, or from
 /// the working tree only when git does not track it.
 pub fn remove_jar(root: &Path, entry: &Entry) -> Result<()> {

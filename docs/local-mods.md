@@ -14,7 +14,7 @@ A changed jar is rebuilt by `modpack manifest` under the same key, and loses its
 
 ## Replacing it once published
 
-When the mod reaches Modrinth or CurseForge, `modpack add <slug>` replaces the local entry when its key is the project's slug, or the `<slug>` given. The new entry keeps the key, so modes need no change, and the jar leaves `mods-local/` and git. Commit the result.
+When the mod reaches Modrinth or CurseForge, `modpack add <slug>` replaces the local entry when its key is the slug of the project the platform resolves; a key that only matches the `<slug>` given is not enough. The new entry keeps the key, so modes need no change, and once the manifest is saved the jar leaves `mods-local/` and git. A jar git does not hold committed (untracked, staged only, or changed since the last commit) is never deleted: `modpack add` stops with exit code 3, unless `--force`. Commit the result.
 
 ## Approval
 

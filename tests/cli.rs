@@ -80,6 +80,7 @@ fn command_help_shows_its_arguments() {
         (&["add"], &["<MOD>", "--version", "--mode"]),
         (&["remove"], &["<KEY>"]),
         (&["manifest"], &["--check"]),
+        (&["install"], &["--force"]),
         (&["mode", "load"], &["<MODE>", "--force"]),
         (&["test"], &["[MODE]", "--condition"]),
         (&["pack"], &["[MODE]", "--platform", "--out"]),
@@ -101,7 +102,8 @@ fn command_help_shows_its_arguments() {
 
 #[test]
 fn every_command_is_not_implemented_yet() {
-    for words in COMMANDS {
+    const IMPLEMENTED: &[&str] = &["install"];
+    for words in COMMANDS.iter().filter(|w| !IMPLEMENTED.contains(&w[0])) {
         modpack()
             .args(*words)
             .assert()

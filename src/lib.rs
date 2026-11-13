@@ -8,6 +8,7 @@ pub mod conditions;
 pub mod context;
 pub mod error;
 pub mod launcher;
+pub mod mode;
 pub mod model;
 pub mod platform;
 pub mod prompt;

@@ -6,6 +6,8 @@ use std::path::Path;
 
 use crate::context::Context;
 use crate::error::{Error, Result};
+use crate::launcher::running::{GameDetector, Processes};
+use crate::mode::{self, LoadContext};
 use crate::model::instance::{InstanceState, Instances};
 use crate::model::manifest::{self, Entry, Manifest};
 use crate::model::socle::SocleConfig;
@@ -34,6 +36,7 @@ pub fn run(args: Args, ctx: &Context) -> Result<()> {
         sources,
         args.force,
         &instances,
+        &Processes,
         &mut std::io::stdout().lock(),
     )
 }
@@ -44,6 +47,7 @@ fn install(
     sources: Sources<'_>,
     force: bool,
     instances_file: &Path,
+    game: &dyn GameDetector,
     out: &mut dyn Write,
 ) -> Result<()> {
     let manifest_path = root.join(manifest::FILE_NAME);
@@ -115,7 +119,13 @@ fn install(
             "rerun with --force to replace them with the manifest's version, or run `modpack manifest` if you changed them on purpose",
         ));
     }
-    reload(root, instances_file, out)
+    let ctx = LoadContext {
+        root,
+        instances_file,
+        game,
+        sources,
+    };
+    reload(&ctx, out)
 }
 
 fn entries<'a>(manifest: &'a Manifest, keys: &[String]) -> Vec<&'a Entry> {
@@ -140,9 +150,9 @@ fn write_failure(out: &mut dyn Write, failure: &Failure) -> Result<()> {
 
 /// Reloads the mode loaded in the pack's instance, if the pack has an
 /// instance on this machine and a mode was loaded there.
-fn reload(root: &Path, instances_file: &Path, out: &mut dyn Write) -> Result<()> {
-    let name = SocleConfig::load(root)?.init.name;
-    let Some(instance) = Instances::load(instances_file)?
+fn reload(ctx: &LoadContext<'_>, out: &mut dyn Write) -> Result<()> {
+    let name = SocleConfig::load(ctx.root)?.init.name;
+    let Some(instance) = Instances::load(ctx.instances_file)?
         .get(&name)
         .filter(|dir| dir.is_dir())
         .map(Path::to_path_buf)
@@ -154,16 +164,8 @@ fn reload(root: &Path, instances_file: &Path, out: &mut dyn Write) -> Result<()>
         tracing::info!(instance = %instance.display(), "no mode loaded yet, nothing to reload");
         return Ok(());
     };
-    load_mode(&mode, out)
-}
-
-/// Call site of the mode loading. Until `modpack mode load` exists, it does
-/// nothing and says so.
-fn load_mode(mode: &str, out: &mut dyn Write) -> Result<()> {
-    writeln!(
-        out,
-        "mode `{mode}` not reloaded into the instance: loading a mode is not implemented yet"
-    )?;
+    let report = mode::load(ctx, &mode, false)?;
+    write!(out, "{report}")?;
     Ok(())
 }
 
@@ -174,6 +176,15 @@ mod tests {
     use crate::model::socle::InitValues;
     use crate::store::download::tests::{MapFetch, NoFetch, entry, manifest};
     use std::fs;
+
+    /// Minecraft never runs.
+    struct NoGame;
+
+    impl GameDetector for NoGame {
+        fn is_running(&self, _instance_dir: &Path) -> Result<bool> {
+            Ok(false)
+        }
+    }
 
     const PACK: &str = "Test Pack";
 
@@ -243,6 +254,7 @@ mod tests {
                 sources,
                 force,
                 &self.instances_file(),
+                &NoGame,
                 &mut out,
             );
             (result, String::from_utf8(out).unwrap())
@@ -331,6 +343,11 @@ mod tests {
         result.unwrap();
         assert!(!out.contains("mode"), "no mode loaded yet: {out}");
 
+        fs::write(
+            repo.path("modes.toml"),
+            "[modes.server]\nremove = [\"iris\"]\n",
+        )
+        .unwrap();
         InstanceState {
             mode: Some("server".into()),
             ..Default::default()
@@ -339,7 +356,32 @@ mod tests {
         .unwrap();
         let (result, out) = repo.install_with(&NoFetch, false);
         result.unwrap();
-        assert!(out.contains("mode `server` not reloaded"), "{out}");
+        assert!(out.contains("mode `server` loaded into"), "{out}");
+        assert!(out.contains("jars copied: mods/jei-1.0.0.jar\n"), "{out}");
+        assert!(instance.join("mods/jei-1.0.0.jar").is_file());
+        assert!(!instance.join("mods/iris-1.0.0.jar").exists());
+    }
+
+    #[test]
+    fn reload_stops_on_drift_and_leaves_the_instance() {
+        let repo = Repo::new();
+        let instance = repo.machine.path().join("profiles/Test Pack");
+        fs::create_dir_all(instance.join("config")).unwrap();
+        let mut instances = Instances::default();
+        instances.set(PACK, instance.clone());
+        instances.save(&repo.instances_file()).unwrap();
+        fs::write(repo.path("modes.toml"), "[default]\n").unwrap();
+        fs::write(instance.join("config/a.toml"), "changed in game").unwrap();
+        let mut state = InstanceState {
+            mode: Some("default".into()),
+            ..Default::default()
+        };
+        state.files.insert("config/a.toml".into(), "0".repeat(64));
+        state.save(&instance).unwrap();
+
+        let (result, _) = repo.install(false);
+        assert_eq!(result.unwrap_err().kind(), ErrorKind::Blocked);
+        assert!(!instance.join("mods").exists());
     }
 
     #[test]

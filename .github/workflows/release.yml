@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  TARGET: x86_64-unknown-linux-musl
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.TARGET }}
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo build --release --locked --target "$TARGET"
+      - name: Archive with checksum
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          archive="modpack-${version}-${TARGET}.tar.gz"
+          tar -czf "$archive" -C "target/${TARGET}/release" modpack
+          sha256sum "$archive" > "$archive.sha256"
+          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A version with a suffix (v0.1.0-rc1) is a prerelease.
+          prerelease=""
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease="--prerelease"; fi
+          gh release create "$GITHUB_REF_NAME" $prerelease --verify-tag --generate-notes \
+            "$ARCHIVE" "$ARCHIVE.sha256"

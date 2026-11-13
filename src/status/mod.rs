@@ -16,8 +16,9 @@ use crate::model::instance::{InstanceState, Instances, disabled_in_app, drift};
 use crate::model::manifest::{self, Manifest};
 use crate::model::socle::{SocleConfig, VersionCheck, cli_version, compare_versions};
 use crate::ops::local::{LocalMod, local_mods};
+use crate::ops::manifest::is_local_path;
 use crate::store::inventory::inventory;
-use crate::store::{LOCAL_DIR, MODS_DIR, jars_in};
+use crate::store::{MODS_DIR, jars_in};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Status {
@@ -270,14 +271,17 @@ impl Status {
 
         // Git holds the jars of mods-local/: `modpack install` cannot restore
         // them.
-        let (local_missing, missing): (Vec<&Jar>, Vec<&Jar>) =
-            self.missing_jars.iter().partition(|j| is_local(&j.path));
+        let (local_missing, missing): (Vec<&Jar>, Vec<&Jar>) = self
+            .missing_jars
+            .iter()
+            .partition(|j| is_local_path(&j.path));
         let missing: Vec<String> = missing.into_iter().map(Jar::describe).collect();
         list(
             out,
             "jars missing from mods/, run `modpack install`",
             &missing,
         )?;
+        let local_missing_keys: Vec<&str> = local_missing.iter().map(|j| j.key.as_str()).collect();
         let local_missing: Vec<String> = local_missing
             .into_iter()
             .map(|j| {
@@ -298,9 +302,9 @@ impl Status {
         // The jars of mods-local/ go to the local mods section.
         let m = &self.manifest;
         let (local_new, new_jars): (Vec<&String>, Vec<&String>) =
-            m.new_jars.iter().partition(|p| is_local(p));
+            m.new_jars.iter().partition(|p| is_local_path(p));
         let (local_changed, changed): (Vec<&Jar>, Vec<&Jar>) =
-            m.changed.iter().partition(|j| is_local(&j.path));
+            m.changed.iter().partition(|j| is_local_path(&j.path));
         if m.stale {
             writeln!(out, "manifest: stale; run `modpack manifest`")?;
             let new_jars: Vec<String> = new_jars.into_iter().cloned().collect();
@@ -315,7 +319,10 @@ impl Status {
             .local_mods
             .iter()
             .map(|m| {
-                if local_changed.iter().any(|j| j.key == m.key) {
+                // Approving needs the jar: git restores it first.
+                if local_missing_keys.contains(&m.key.as_str()) {
+                    format!("{} ({}), jar missing: restore it first", m.key, m.path)
+                } else if local_changed.iter().any(|j| j.key == m.key) {
                     format!(
                         "{} ({}), changed since the manifest: run `modpack manifest`, review it, then run `modpack approve {}`",
                         m.key, m.path, m.key
@@ -338,11 +345,6 @@ impl Status {
         list(out, "local mods, tracked by git in mods-local/", &local)?;
         Ok(())
     }
-}
-
-/// Whether a path of the repository is under `mods-local/`.
-fn is_local(path: &str) -> bool {
-    path.starts_with(&format!("{LOCAL_DIR}/"))
 }
 
 impl Jar {
@@ -584,6 +586,12 @@ mod tests {
             "{text}"
         );
         assert!(!text.contains("modpack install"), "{text}");
+        // Approving would fail on the missing jar: not offered.
+        assert!(
+            text.contains("custom (mods-local/custom.jar), jar missing: restore it first"),
+            "{text}"
+        );
+        assert!(!text.contains("modpack approve"), "{text}");
     }
 
     #[test]

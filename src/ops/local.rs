@@ -197,6 +197,24 @@ pub fn jar_committed(root: &Path, entry: &Entry) -> bool {
         && git(&["status", "--porcelain", "--", &entry.path]).is_some_and(|o| o.is_empty())
 }
 
+/// Refuses, unless `force`, to delete the jar of a local mod that git does not
+/// hold committed. `doing` names the operation, such as "removing".
+pub fn refuse_uncommitted(root: &Path, entry: &Entry, force: bool, doing: &str) -> Result<()> {
+    if force || !jar_path(root, entry)?.is_file() || jar_committed(root, entry) {
+        return Ok(());
+    }
+    Err(Error::blocked(
+        format!(
+            "{doing} the local mod `{}` would delete {}, which is not committed in git",
+            entry.key, entry.path
+        ),
+        format!(
+            "commit {} first, or rerun with --force to delete it anyway",
+            entry.path
+        ),
+    ))
+}
+
 /// Removes the jar of a local mod from the working tree and from git, or from
 /// the working tree only when git does not track it.
 pub fn remove_jar(root: &Path, entry: &Entry) -> Result<()> {

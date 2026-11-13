@@ -14,7 +14,7 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
-use super::local::{jar_committed, remove_jar};
+use super::local::{refuse_uncommitted, remove_jar};
 use super::manifest::{Draft, check_file_name, complete, first_line, load_or_new};
 use super::variants_edit;
 use crate::error::{Context, Error, Result};
@@ -190,20 +190,8 @@ pub fn remove(root: &Path, key: &str, force: bool, out: &mut dyn Write) -> Resul
             format!("use a key listed in {}", manifest::FILE_NAME),
         )
     })?;
-    if entry.is_local() && !force && jar_path(root, entry)?.is_file() && !jar_committed(root, entry)
-    {
-        return Err(Error::blocked(
-            format!(
-                "removing the local mod `{key}` would delete {}, which is not committed in git",
-                entry.path
-            ),
-            format!(
-                "commit {} first, or rerun with --force to delete it anyway",
-                entry.path
-            ),
-        ));
-    }
     if entry.is_local() {
+        refuse_uncommitted(root, entry, force, "removing")?;
         remove_jar(root, entry)?;
     } else if let Ok(jar) = jar_path(root, entry)
         && jar.is_file()
@@ -406,21 +394,8 @@ fn add_remote(
         ));
     }
     check_file_name(manifest, &rel, previous.as_ref().map(|p| p.key.as_str()))?;
-    if let Some(local) = previous.as_ref().filter(|p| p.is_local())
-        && !edit.force
-        && jar_path(root, local)?.is_file()
-        && !jar_committed(root, local)
-    {
-        return Err(Error::blocked(
-            format!(
-                "replacing the local mod `{}` would delete {}, which is not committed in git",
-                local.key, local.path
-            ),
-            format!(
-                "commit {} first, or rerun with --force to delete it anyway",
-                local.path
-            ),
-        ));
+    if let Some(local) = previous.as_ref().filter(|p| p.is_local()) {
+        refuse_uncommitted(root, local, edit.force, "replacing")?;
     }
 
     let mut entry = Entry {

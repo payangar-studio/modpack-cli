@@ -4,7 +4,8 @@
 //! finds the pack's instance, refuses while Minecraft runs from it, stops on
 //! drift unless forced, resolves the mode, then puts the mode's jars in the
 //! instance's `mods/`, writes the base config and the mode's overrides into
-//! its `config/`, and records what it wrote in `.modpack-state.toml`.
+//! its `config/`, removes the config files it wrote that the mode does not
+//! have, and records what it wrote in `.modpack-state.toml`.
 //!
 //! A jar of the instance is identified by its hashes. Only jars the manifest
 //! knows are ever removed; any other jar is the user's, tried from the app,
@@ -63,6 +64,8 @@ pub struct LoadReport {
     pub unknown: Vec<String>,
     /// Config files written into the instance.
     pub written: Vec<String>,
+    /// Config files the CLI wrote for another mode, removed from the instance.
+    pub config_removed: Vec<String>,
     /// Files changed in the instance that `--force` overwrote or let go.
     pub forced: Vec<String>,
 }
@@ -174,10 +177,26 @@ pub fn load(ctx: &LoadContext<'_>, mode: &str, force: bool) -> Result<LoadReport
         report.copied.push(rel);
     }
 
-    for (rel, source) in config_files(root, mode)? {
-        copy_file(&source, &instance.join(&rel))?;
-        new_state.record(&instance, &rel)?;
-        report.written.push(rel);
+    let configs = config_files(root, mode)?;
+    for (rel, source) in &configs {
+        copy_file(source, &instance.join(rel))?;
+        new_state.record(&instance, rel)?;
+        report.written.push(rel.clone());
+    }
+    // A config file the CLI wrote that this mode does not have, such as the
+    // previous mode's override, goes. Changed since, it is drift: past the
+    // check above only with --force, which lets the repository win.
+    let config_prefix = format!("{CONFIG_DIR}/");
+    for rel in state.files.keys() {
+        if !rel.starts_with(&config_prefix) || configs.contains_key(rel) {
+            continue;
+        }
+        let path = instance.join(rel);
+        match fs::remove_file(&path) {
+            Ok(()) => report.config_removed.push(rel.clone()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e).context(format!("removing {}", path.display())),
+        }
     }
 
     new_state.save(&instance)?;
@@ -371,6 +390,7 @@ impl fmt::Display for LoadReport {
             ("jars copied", &self.copied),
             ("jars removed", &self.removed),
             ("config written", &self.written),
+            ("config removed", &self.config_removed),
             (
                 "changed in the instance, overwritten (--force)",
                 &self.forced,

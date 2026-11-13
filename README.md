@@ -30,7 +30,7 @@ The Modrinth App must be installed for `modpack setup` to create the pack's inst
 | `modpack manifest [--check]` | Updates `mods.lock.toml` from `mods/`: adds the new jars, rebuilds the entries whose jar changed. A jar missing from `mods/` keeps its entry, with a warning (not installed here is not removed). A jar `modpack install` downloaded that the manifest no longer lists is never added back. `--check` fails when it is stale. Run by the `pre-commit` hook. |
 | `modpack install [--force]` | Downloads the missing jars into `mods/`, removes the ones it downloaded that the manifest no longer lists (recorded in `.modpack/local/installed.toml`), then reloads the mode loaded in the instance. Run by the `post-merge` and `post-checkout` hooks. |
 | `modpack mode list` | Lists the modes and marks the loaded one. |
-| `modpack mode load <mode> [--force]` | Loads a mode into the instance. Refuses while Minecraft runs; stops on files changed in the instance, unless `--force`. |
+| `modpack mode load <mode> [--force]` | Loads a mode into the instance: its jars, the base config and its overrides; removes the config files written for the previous mode. Refuses while Minecraft runs; stops on files changed in the instance, unless `--force`. |
 | `modpack status [--json]` | Loaded mode, drift, jars unknown to the manifest, state of the manifest. The JSON format is in [`docs/status.md`](docs/status.md). |
 | `modpack test [mode] [--condition] [--json]` | Checks the conditions of a mode, or of all modes. |
 | `modpack pack [mode] [--platform] [--out] [--pack-version] [--json]` | Builds the `.mrpack` and the CurseForge zip of a mode, or of all modes, into `dist/`. |

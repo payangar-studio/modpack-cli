@@ -184,11 +184,34 @@ fn state_reflects_exactly_the_files_written() {
         )
     );
 
-    // Back from `server`, its own config file stays on disk but is no longer managed.
+    // Back from `server`, its own config file is removed.
     s.load("server", false).unwrap();
-    s.load(modes::DEFAULT_MODE, false).unwrap();
-    assert_eq!(s.read("config/server.toml"), "server only");
+    let report = s.load(modes::DEFAULT_MODE, false).unwrap();
+    assert_eq!(report.config_removed, ["config/server.toml"]);
+    assert!(
+        report
+            .to_string()
+            .contains("config removed: config/server.toml")
+    );
+    assert!(!s.instance().join("config/server.toml").exists());
     assert_eq!(s.state(), state);
+}
+
+#[test]
+fn a_config_file_of_the_previous_mode_changed_since_is_drift() {
+    let s = Setup::new();
+    s.load("server", false).unwrap();
+    write(&s.instance(), "config/server.toml", "changed in game");
+
+    let err = s.load(modes::DEFAULT_MODE, false).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Blocked);
+    assert!(err.to_string().contains("- config/server.toml"));
+    assert_eq!(s.read("config/server.toml"), "changed in game");
+
+    let report = s.load(modes::DEFAULT_MODE, true).unwrap();
+    assert_eq!(report.forced, ["config/server.toml"]);
+    assert_eq!(report.config_removed, ["config/server.toml"]);
+    assert!(!s.instance().join("config/server.toml").exists());
 }
 
 #[test]

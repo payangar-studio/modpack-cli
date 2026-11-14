@@ -4,6 +4,10 @@
 use super::*;
 use crate::store::download::tests::{MapFetch, NoFetch, entry, manifest};
 
+#[cfg(unix)]
+#[path = "../../../tests/common/mod.rs"]
+mod common;
+
 /// A machine whose Java does not exist and that fetches nothing.
 pub(in crate::conditions) fn machine_without_network() -> Machine<'static> {
     Machine {
@@ -84,7 +88,6 @@ mod fake {
     use super::*;
     use crate::conditions::server::java::tests::mojang;
     use crate::conditions::server::loader::{FABRIC_INSTALLERS, NEOFORGE_MAVEN};
-    use std::os::unix::fs::PermissionsExt;
 
     const FABRIC_INSTALLER_URL: &str = "https://maven.invalid/fabric-installer-1.1.2.jar";
     const DONE: &str = r#"echo '[Server thread/INFO]: Done (0.1s)! For help, type "help"'"#;
@@ -144,20 +147,8 @@ fi
 "#,
                 calls = calls.display()
             );
-            // `cp` writes the script, so that this process never holds a write
-            // descriptor on it: a test spawning a process meanwhile would hand
-            // that descriptor to its child until the child's exec, and running
-            // the script would fail with "Text file busy" (ETXTBSY).
-            let source = self.bin.path().join("java.sh");
-            fs::write(&source, script).unwrap();
             let path = self.bin.path().join("java");
-            let copied = std::process::Command::new("cp")
-                .arg(&source)
-                .arg(&path)
-                .status()
-                .unwrap();
-            assert!(copied.success());
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+            common::write_executable(&path, &script);
             path
         }
 

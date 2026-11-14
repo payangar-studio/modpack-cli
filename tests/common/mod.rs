@@ -1,4 +1,5 @@
-//! Helpers shared by the integration tests.
+//! Helpers shared by the tests. Unit tests under `src/` include this file
+//! with `#[path]`.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

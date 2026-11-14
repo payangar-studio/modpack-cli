@@ -120,7 +120,7 @@ impl fmt::Display for Problem {
             Problem::UnknownKey { variant, key } => {
                 write!(
                     f,
-                    "variant `{variant}` names `{key}`, which is not in mods.lock.toml"
+                    "variant `{variant}` names `{key}`, which is not in modpack.lock.toml"
                 )
             }
             Problem::AlreadyPresent { variant, key } => write!(
@@ -240,7 +240,7 @@ impl Variants {
         }
         let list: Vec<String> = problems.iter().map(|p| format!("\n  - {p}")).collect();
         Err(invalid(format!(
-            "inconsistent with mods.lock.toml:{}",
+            "inconsistent with modpack.lock.toml:{}",
             list.concat()
         )))
     }
@@ -500,7 +500,7 @@ mod tests {
         );
         let err = variants.resolve("a", &manifest()).unwrap_err().to_string();
         assert!(err.contains("`ghost`"));
-        assert!(err.starts_with("error: variants.toml: inconsistent with mods.lock.toml:"));
+        assert!(err.starts_with("error: variants.toml: inconsistent with modpack.lock.toml:"));
         let first_line = err.lines().next().unwrap();
         assert_eq!(first_line.matches("variants.toml").count(), 1, "{err}");
     }

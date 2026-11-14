@@ -172,7 +172,7 @@ fn the_return_skill_reads_the_status_json() {
         "modpack status --json",
         "instance.path",
         "instance.variant",
-        "unknown_jars",
+        "unknown_files",
         "drift",
     ] {
         assert!(text.contains(field), "`{field}` missing");
@@ -266,7 +266,7 @@ fn the_return_skill_probes_inside_the_repository() {
             &[
                 "check-ignore",
                 "--quiet",
-                ".modpack/local/return/mods.lock.toml"
+                ".modpack/local/return/modpack.lock.toml"
             ],
             &root
         ),

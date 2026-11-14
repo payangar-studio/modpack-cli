@@ -117,7 +117,7 @@ pub fn register_instance(
             name,
             version: REGISTER_VERSION,
             pack,
-            mods: Vec::new(),
+            entries: Vec::new(),
             overrides: Vec::new(),
             out_dir: machine.mrpack_dir,
             file_stem: name,

@@ -120,12 +120,9 @@ impl Setup {
         InstanceState::load(&self.instance()).unwrap()
     }
 
-    /// Jar files of the instance's `mods/`, sorted.
+    /// Files of the instance's `mods/` and `resourcepacks/`, sorted.
     fn jars(&self) -> Vec<String> {
-        jars_in(&self.instance().join(MODS_DIR))
-            .unwrap()
-            .into_keys()
-            .collect()
+        files_in(&self.instance()).unwrap().into_keys().collect()
     }
 }
 
@@ -161,7 +158,49 @@ fn first_load_copies_the_variant_jars_and_writes_the_config() {
 
     let text = report.to_string();
     assert!(text.contains("variant `default` loaded into"), "{text}");
-    assert!(text.contains("jars copied: mods/a-1.0.0.jar"), "{text}");
+    assert!(text.contains("files copied: mods/a-1.0.0.jar"), "{text}");
+}
+
+#[test]
+fn resource_packs_go_to_the_instance_resourcepacks() {
+    let s = Setup::new();
+    let mut house = entry("house", b"house");
+    house.kind = crate::model::manifest::Kind::Resourcepack;
+    house.path = "resourcepacks-local/house.zip".into();
+    house.source = Some(crate::model::manifest::Source::Local);
+    let mut faithful = entry("faithful", b"faithful");
+    faithful.kind = crate::model::manifest::Kind::Resourcepack;
+    faithful.path = "resourcepacks/faithful.zip".into();
+    let path = s.root().join(manifest::FILE_NAME);
+    let mut lock = Manifest::load(&path).unwrap();
+    lock.upsert(house);
+    lock.upsert(faithful);
+    lock.save(&path).unwrap();
+    write(s.root(), "resourcepacks-local/house.zip", "house");
+    write(s.root(), "resourcepacks/faithful.zip", "faithful");
+    // The player's own pack, unknown to the manifest, stays.
+    write(&s.instance(), "resourcepacks/mine.zip", "mine");
+
+    let report = s.load(variants::DEFAULT_VARIANT, false).unwrap();
+    assert!(
+        report
+            .copied
+            .contains(&"resourcepacks/house.zip".to_owned()),
+        "{:?}",
+        report.copied
+    );
+    assert_eq!(s.read("resourcepacks/faithful.zip"), "faithful");
+    assert_eq!(report.unknown, ["resourcepacks/mine.zip"]);
+
+    // Out of the variant, the CLI's resource pack goes; the player's stays.
+    write(
+        s.root(),
+        variants::FILE_NAME,
+        "[default]\nremove = [\"extra\", \"faithful\"]\n",
+    );
+    let report = s.load(variants::DEFAULT_VARIANT, false).unwrap();
+    assert_eq!(report.removed, ["resourcepacks/faithful.zip"]);
+    assert!(s.instance().join("resourcepacks/mine.zip").is_file());
 }
 
 #[test]

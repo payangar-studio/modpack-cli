@@ -1,5 +1,7 @@
 mods/*.jar
 !mods-local/*.jar
+resourcepacks/*.zip
+!resourcepacks-local/*.zip
 .source/
 .modpack/local/
 dist/

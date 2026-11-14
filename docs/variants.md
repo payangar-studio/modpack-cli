@@ -1,6 +1,6 @@
 # `variants.toml`
 
-`variants.toml`, at the root of a pack repository, lists the variants of the pack and the conditions each variant must meet. A variant is a selection of the pack's mods plus its own configuration: the full pack, a dedicated server, a lighter client. Every command that reads the file refuses it, with exit code 2, when it breaks a rule below.
+`variants.toml`, at the root of a pack repository, lists the variants of the pack and the conditions each variant must meet. A variant is a selection of the pack's mods and resource packs, named by their keys in `modpack.lock.toml`, plus its own configuration: the full pack, a dedicated server, a lighter client. A resource pack runs on the client only: like a client-only mod, a variant with `side = "server"` must leave it out. Every command that reads the file refuses it, with exit code 2, when it breaks a rule below.
 
 ## Example
 
@@ -33,7 +33,7 @@ The default variant holds every mod but `hardcore-tweaks`. `server` holds the de
 
 ## Variants
 
-There is one level of variants. The default variant is the full pack; every other variant is defined from it, never from another variant. Mods are named by their key in `mods.lock.toml`.
+There is one level of variants. The default variant is the full pack; every other variant is defined from it, never from another variant. Mods are named by their key in `modpack.lock.toml`.
 
 | Table | Fields |
 |---|---|
@@ -64,8 +64,8 @@ Conditions are set in a `conditions` table: at the root of the file for every va
 
 | Condition | Values | What `modpack test` checks |
 |---|---|---|
-| `side` | `"client"` or `"server"` | Every mod of the variant supports that side, after its `env` in `mods.lock.toml`: a mod whose `env.client` (or `env.server`) is `unsupported` fails it. |
-| `deps-complete` | `true` or `false` | Every required dependency each mod of the variant declares (the `dependencies` of its platform tables in `mods.lock.toml`) is a mod of the variant. A dependency that is in the manifest but not in the variant fails it, and so does one no mod of the manifest provides. |
+| `side` | `"client"` or `"server"` | Every mod and resource pack of the variant supports that side, after its `env` in `modpack.lock.toml`: an entry whose `env.client` (or `env.server`) is `unsupported` fails it. |
+| `deps-complete` | `true` or `false` | Every required dependency each mod of the variant declares (the `dependencies` of its platform tables in `modpack.lock.toml`) is a mod of the variant. A dependency that is in the manifest but not in the variant fails it, and so does one no mod of the manifest provides. |
 | `server-starts` | `true`, or `{ timeout = "<duration>" }` | A dedicated server with the variant's mods reaches the `Done` line of its log within the timeout, 300 seconds by default. A crash or the timeout fails it. |
 | `client-starts` | `true` or `false` | Not implemented yet: always skipped. |
 

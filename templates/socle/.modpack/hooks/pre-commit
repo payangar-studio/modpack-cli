@@ -1,13 +1,14 @@
 #!/bin/sh
 # Managed by modpack-cli; `modpack update` rewrites this file.
-# Regenerates mods.lock.toml from mods/ and mods-local/, checks variants.toml
-# against it, and adds it to the commit with the jars of mods-local/, so that no
-# commit leaves with a stale list of mods, variants naming mods the pack does not
-# have, or a local mod whose jar is not committed. Without network the
-# platforms are skipped with a warning: the commit goes through.
+# Regenerates modpack.lock.toml from mods/, resourcepacks/ and their local
+# directories, checks variants.toml against it, and adds it to the commit with
+# the files of mods-local/ and resourcepacks-local/, so that no commit leaves
+# with a stale list of mods and resource packs, variants naming entries the pack
+# does not have, or a local entry whose file is not committed. Without network
+# the platforms are skipped with a warning: the commit goes through.
 
 if ! command -v modpack >/dev/null 2>&1; then
-    echo "modpack-cli: modpack is not in PATH, mods.lock.toml was not regenerated; install modpack-cli, then run \`modpack manifest\`." >&2
+    echo "modpack-cli: modpack is not in PATH, modpack.lock.toml was not regenerated; install modpack-cli, then run \`modpack manifest\`." >&2
     exit 0
 fi
 
@@ -16,9 +17,11 @@ if ! modpack manifest </dev/null; then
     exit 1
 fi
 
-# New and changed jars only: a jar deleted by hand keeps its entry, so its
+# New and changed files only: a file deleted by hand keeps its entry, so its
 # deletion is not committed; `modpack remove` stages it.
-if [ -d mods-local ]; then
-    git add --ignore-removal -- mods-local || exit 1
-fi
-git add -- mods.lock.toml
+for dir in mods-local resourcepacks-local; do
+    if [ -d "$dir" ]; then
+        git add --ignore-removal -- "$dir" || exit 1
+    fi
+done
+git add -- modpack.lock.toml

@@ -16,6 +16,9 @@ use crate::error::{Error, Result};
 pub const MINECRAFT: u32 = 432;
 /// Class id of mods, among Minecraft's classes (mods, modpacks, resource packs...).
 pub const CLASS_MODS: u32 = 6;
+/// Class id of resource packs. CurseForge documents no class id; this one is
+/// what the API answers for resource packs.
+pub const CLASS_RESOURCE_PACKS: u32 = 12;
 /// `FileRelationType` of a required dependency.
 pub const REQUIRED_DEPENDENCY: u8 = 3;
 
@@ -37,6 +40,9 @@ struct Data<T> {
 pub struct Mod {
     pub id: u64,
     pub slug: String,
+    /// Mods, resource packs, modpacks...: see `CLASS_MODS`.
+    #[serde(default)]
+    pub class_id: Option<u32>,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
@@ -136,11 +142,11 @@ impl Api {
         self.get(&format!("/v1/mods/{id}"), &[], "reading a project")
     }
 
-    /// The mod whose slug is `slug`, if any.
-    pub fn mod_by_slug(&self, slug: &str) -> Result<Option<Mod>> {
+    /// The project of class `class` whose slug is `slug`, if any.
+    pub fn mod_by_slug(&self, slug: &str, class: u32) -> Result<Option<Mod>> {
         let query = [
             ("gameId", MINECRAFT.to_string()),
-            ("classId", CLASS_MODS.to_string()),
+            ("classId", class.to_string()),
             ("slug", slug.to_owned()),
         ];
         let found: Vec<Mod> = self
@@ -149,14 +155,16 @@ impl Api {
         Ok(found.into_iter().find(|m| m.slug == slug))
     }
 
-    /// The latest files of a mod for a Minecraft version and a loader
-    /// (`ModLoaderType`), one page of 50 at most.
-    pub fn files(&self, mod_id: u64, minecraft: &str, loader: u8) -> Result<Vec<File>> {
-        let query = [
+    /// The latest files of a project for a Minecraft version and, for a mod,
+    /// a loader (`ModLoaderType`), one page of 50 at most.
+    pub fn files(&self, mod_id: u64, minecraft: &str, loader: Option<u8>) -> Result<Vec<File>> {
+        let mut query = vec![
             ("gameVersion", minecraft.to_owned()),
-            ("modLoaderType", loader.to_string()),
             ("pageSize", "50".to_owned()),
         ];
+        if let Some(loader) = loader {
+            query.push(("modLoaderType", loader.to_string()));
+        }
         Ok(self
             .get(&format!("/v1/mods/{mod_id}/files"), &query, "listing files")?
             .unwrap_or_default())

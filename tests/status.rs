@@ -43,7 +43,7 @@ fn json_status_of_a_repository_without_instance() {
     )
     .unwrap();
     fs::write(
-        repo.path().join("mods.lock.toml"),
+        repo.path().join("modpack.lock.toml"),
         "[pack]\nminecraft = \"1.21.1\"\nloader = \"neoforge\"\nloader-version = \"21.1.77\"\n",
     )
     .unwrap();
@@ -60,7 +60,7 @@ fn json_status_of_a_repository_without_instance() {
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert!(json["instance"].is_null());
     assert_eq!(json["manifest"]["stale"], true);
-    assert_eq!(json["manifest"]["new_jars"][0], "mods/by-hand.jar");
+    assert_eq!(json["manifest"]["new_files"][0], "mods/by-hand.jar");
 
     modpack(repo.path(), home.path())
         .arg("status")

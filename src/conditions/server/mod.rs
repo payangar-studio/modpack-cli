@@ -23,7 +23,7 @@ use serde::de::DeserializeOwned;
 
 use super::Status;
 use crate::error::{Error, Result};
-use crate::model::manifest::{Manifest, Pack, Support};
+use crate::model::manifest::{Kind, Manifest, Pack, Support};
 use crate::model::variants::Resolved;
 use crate::store::{self, download::Fetch};
 use loader::Loader;
@@ -161,19 +161,19 @@ fn prepare(
     let dir = run.path();
     copy_tree(server, dir, true)?;
 
-    let mods = dir.join(store::MODS_DIR);
+    let mods = dir.join(Kind::Mod.dir());
     fs::create_dir_all(&mods).map_err(io_err("creating", &mods))?;
     let mut missing = Vec::new();
     let mut local_missing = Vec::new();
     // A client-only mod is left out, as a server installed from the .mrpack
-    // leaves it out.
+    // leaves it out; so is every resource pack, which a server never loads.
     let on_server = variant
         .keys
         .iter()
         .filter_map(|k| manifest.get(k))
-        .filter(|e| e.env.server != Support::Unsupported);
+        .filter(|e| e.kind == Kind::Mod && e.env.server != Support::Unsupported);
     for entry in on_server {
-        let jar = store::jar_path(root, entry).map_err(reason)?;
+        let jar = store::file_path(root, entry).map_err(reason)?;
         if !jar.is_file() {
             match entry.is_local() {
                 true => local_missing.push(entry.path.as_str()),
@@ -181,7 +181,7 @@ fn prepare(
             }
             continue;
         }
-        let name = jar.file_name().expect("jar_path ends with a file name");
+        let name = jar.file_name().expect("file_path ends with a file name");
         link_or_copy(&jar, &mods.join(name))?;
     }
     if !missing.is_empty() {

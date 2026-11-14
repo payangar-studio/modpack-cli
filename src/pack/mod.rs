@@ -1,16 +1,19 @@
 //! Building the pack artifacts: one per variant and per platform.
 //!
-//! Each artifact holds the mods of the resolved variant, and under `overrides/`
-//! the base `config/` then the variant's `overrides/<variant>/config/`. Before
-//! building for a platform, every mod goes through its `pack_eligibility`; a
-//! mod it refuses blocks that platform for that variant only. The platform alone
-//! decides, so a mod with no table for a platform (hosted on GitHub, say) may
-//! still be packed for it.
+//! Each artifact holds the mods and resource packs of the resolved variant,
+//! and under `overrides/` the base `config/` then the variant's
+//! `overrides/<variant>/config/`. Before building for a platform, every entry
+//! goes through its `pack_eligibility`; an entry it refuses blocks that
+//! platform for that variant only. The platform alone decides, so an entry
+//! with no table for a platform (hosted on GitHub, say) may still be packed
+//! for it.
 //!
-//! A local mod (a jar of `mods-local/`) goes into the pack's overrides, as
-//! `overrides/mods/<name>`, for every platform: no platform is asked whether
-//! it is eligible. Every build warns about local mods, approved or not, and
-//! about what each platform says of embedded jars; it never blocks on them.
+//! A local entry (a file of `mods-local/` or `resourcepacks-local/`) goes into
+//! the pack's overrides, at its place in an instance (`overrides/mods/<name>`,
+//! `overrides/resourcepacks/<name>`), for every platform: no platform is asked
+//! whether it is eligible. Every build warns about local entries, approved or
+//! not, and about what each platform says of embedded files; it never blocks
+//! on them.
 
 mod version;
 
@@ -26,12 +29,12 @@ use crate::error::{Context, Error, Result};
 use crate::model::manifest::{self, Entry, Manifest, normalize_key};
 use crate::model::socle::SocleConfig;
 use crate::model::variants::{self, Variants};
-use crate::ops::local::LocalMod;
+use crate::ops::local::LocalEntry;
 use crate::platform::{
     Capability, Eligibility, Operation, Override, PackBuild, Platform, Registry, unsupported,
 };
+use crate::store::file_path;
 use crate::store::hash::hash_file;
-use crate::store::jar_path;
 
 /// Default output directory, relative to the repository root.
 pub const OUT_DIR: &str = "dist";
@@ -53,9 +56,9 @@ pub struct Report {
     pub version: String,
     pub artifacts: Vec<Artifact>,
     pub blocked: Vec<Blocked>,
-    /// The local mods embedded in at least one pack built.
-    pub local: Vec<LocalMod>,
-    /// What to check about the local mods; never blocking.
+    /// The local entries embedded in at least one pack built.
+    pub local: Vec<LocalEntry>,
+    /// What to check about the local entries; never blocking.
     pub warnings: Vec<String>,
 }
 
@@ -66,7 +69,7 @@ pub struct Artifact {
     pub path: PathBuf,
 }
 
-/// A variant a platform could not pack, and the mods that stopped it.
+/// A variant a platform could not pack, and the entries that stopped it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Blocked {
     pub variant: String,
@@ -99,7 +102,7 @@ impl Report {
         }
         Some(Error::blocked(
             what,
-            "leave these mods out of the variant in variants.toml, or build only the other platforms with --platform",
+            "leave these entries out of the variant in variants.toml, or build only the other platforms with --platform",
         ))
     }
 }
@@ -128,7 +131,7 @@ pub fn build(root: &Path, registry: &Registry, request: &Request<'_>) -> Result<
         local: Vec::new(),
         warnings: Vec::new(),
     };
-    // Local mods embedded so far, each jar checked once against the manifest.
+    // Local entries embedded so far, each file checked once against the manifest.
     let mut embedded: std::collections::BTreeMap<&str, (&Entry, PathBuf)> =
         std::collections::BTreeMap::new();
     for variant in variant_names {
@@ -174,7 +177,7 @@ pub fn build(root: &Path, registry: &Registry, request: &Request<'_>) -> Result<
                 name: &name,
                 version: request.version,
                 pack: &manifest.pack,
-                mods: mods.clone(),
+                entries: mods.clone(),
                 overrides: overrides.clone(),
                 out_dir: request.out_dir,
                 file_stem: &file_stem,
@@ -186,11 +189,11 @@ pub fn build(root: &Path, registry: &Registry, request: &Request<'_>) -> Result<
             });
         }
     }
-    // `local_jar` checked each jar against the manifest's hash: the approval
+    // `local_jar` checked each file against the manifest's hash: the approval
     // holds when it matches that hash.
     report.local = embedded
         .values()
-        .map(|(entry, _)| LocalMod {
+        .map(|(entry, _)| LocalEntry {
             key: entry.key.clone(),
             path: entry.path.clone(),
             approved: entry.is_approved(),
@@ -200,15 +203,17 @@ pub fn build(root: &Path, registry: &Registry, request: &Request<'_>) -> Result<
     Ok(report)
 }
 
-/// The jar of a local mod, checked against the manifest: a pack never embeds
-/// a jar other than the one the manifest, and its approval, describe.
+/// The file of a local entry, checked against the manifest: a pack never
+/// embeds a file other than the one the manifest, and its approval, describe.
 fn local_jar(root: &Path, entry: &Entry) -> Result<PathBuf> {
-    let jar = jar_path(root, entry)?;
+    let jar = file_path(root, entry)?;
     if !jar.is_file() {
         return Err(Error::usage(
             format!(
-                "the jar of the local mod `{}`, {}, is missing",
-                entry.key, entry.path
+                "the file of the local {} `{}`, {}, is missing",
+                entry.noun(),
+                entry.key,
+                entry.path
             ),
             format!("restore it with `git checkout -- {}`", entry.path),
         ));
@@ -222,7 +227,7 @@ fn local_jar(root: &Path, entry: &Entry) -> Result<PathBuf> {
                 manifest::FILE_NAME
             ),
             format!(
-                "run `modpack manifest`, then `modpack approve {}` once the new jar is reviewed",
+                "run `modpack manifest`, then `modpack approve {}` once the new file is reviewed",
                 entry.key
             ),
         ));
@@ -230,9 +235,9 @@ fn local_jar(root: &Path, entry: &Entry) -> Result<PathBuf> {
     Ok(jar)
 }
 
-/// One warning per local mod embedded, then one per platform that has
-/// something to say about embedded jars.
-fn local_warnings(local: &[LocalMod], platforms: &[&dyn Platform]) -> Vec<String> {
+/// One warning per local entry embedded, then one per platform that has
+/// something to say about embedded files.
+fn local_warnings(local: &[LocalEntry], platforms: &[&dyn Platform]) -> Vec<String> {
     if local.is_empty() {
         return Vec::new();
     }
@@ -240,7 +245,7 @@ fn local_warnings(local: &[LocalMod], platforms: &[&dyn Platform]) -> Vec<String
         .iter()
         .map(|m| match m.approved {
             true => format!(
-                "`{}` ({}) is a local mod, embedded in the packs; approved",
+                "`{}` ({}) is local, embedded in the packs; approved",
                 m.key, m.path
             ),
             false => format!("{}; the publish workflow refuses it until then", m.todo()),
@@ -271,7 +276,7 @@ fn platforms<'r>(registry: &'r Registry, only: Option<&str>) -> Result<Vec<&'r d
     }
 }
 
-/// The mods the platform cannot pack, with the reason.
+/// The entries the platform cannot pack, with the reason.
 fn ineligible(platform: &dyn Platform, mods: &[&Entry]) -> Result<Vec<BlockedMod>> {
     let mut blocked = Vec::new();
     for entry in mods {

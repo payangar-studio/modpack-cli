@@ -73,6 +73,7 @@ fn project_json() -> Value {
         "id": "AANobbMI",
         "slug": "sodium",
         "title": "Sodium",
+        "project_type": "mod",
         "client_side": "required",
         "server_side": "unsupported",
     })
@@ -112,6 +113,7 @@ fn version_json(api: &Api, id: &str, number: &str, version_type: &str) -> Value 
 fn entry(section: toml::Table) -> Entry {
     Entry {
         key: "sodium".into(),
+        kind: crate::model::manifest::Kind::Mod,
         path: "mods/sodium-0.6.0.jar".into(),
         file_size: 0,
         downloads: Vec::new(),
@@ -246,9 +248,50 @@ fn resolve_lists_compatible_versions_releases_first() {
         assert_eq!(candidates[0].label, "0.6.0");
         assert_eq!(candidates[0].slug.as_deref(), Some("sodium"));
         assert_eq!(candidates[0].file_name, "sodium-0.6.0.jar");
+        assert_eq!(candidates[0].kind, Kind::Mod);
         assert_eq!(candidates[0].section, section("AANobbMI", "Pb3OXVqC"));
         assert_eq!(candidates[1].label, "0.6.1-beta");
     }
+}
+
+#[test]
+fn resolve_of_a_resource_pack_asks_for_the_minecraft_loader() {
+    let api = Api::start();
+    let mut project = project_json();
+    project["project_type"] = json!("resourcepack");
+    api.mount(
+        Mock::given(method("GET"))
+            .and(path("/project/sodium"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(project)),
+    );
+    api.mount(
+        Mock::given(method("GET"))
+            .and(path("/project/AANobbMI/version"))
+            .and(query_param("loaders", r#"["minecraft"]"#))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!([version_json(&api, "Pb3OXVqC", "0.6.0", "release")])),
+            ),
+    );
+    let candidates = api.platform().resolve("sodium", &pack()).unwrap();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].kind, Kind::Resourcepack);
+}
+
+#[test]
+fn resolve_of_another_project_type_is_refused() {
+    let api = Api::start();
+    let mut project = project_json();
+    project["project_type"] = json!("shader");
+    api.mount(
+        Mock::given(method("GET"))
+            .and(path("/project/sodium"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(project)),
+    );
+    let err = api.platform().resolve("sodium", &pack()).unwrap_err();
+    assert_eq!(err.kind(), crate::error::ErrorKind::Usage);
+    assert!(err.to_string().contains("is a shader on Modrinth"), "{err}");
+    assert_eq!(api.requests(), 1, "no version listed");
 }
 
 #[test]
@@ -515,6 +558,27 @@ fn parse_query_reads_slugs_ids_and_modrinth_urls() {
 fn encode_segment_escapes_reserved_characters() {
     assert_eq!(encode_segment("a-b_c.d~e"), "a-b_c.d~e");
     assert_eq!(encode_segment("a/b?c"), "a%2Fb%3Fc");
+}
+
+/// Against the real API: a resource pack resolves with the loader `minecraft`
+/// and is client only.
+#[test]
+#[ignore = "calls the real Modrinth API; run by hand"]
+fn real_api_resolves_a_resource_pack() {
+    let platform = Modrinth::default();
+    let candidates = platform.resolve("faithful-32x", &pack()).unwrap();
+    let first = candidates.first().expect("Faithful 32x exists for 1.21.1");
+    assert_eq!(first.kind, Kind::Resourcepack);
+    assert!(first.file_name.ends_with(".zip"), "{}", first.file_name);
+
+    let mut entry = entry(first.section.clone());
+    entry.kind = first.kind;
+    platform.fill_entry(&mut entry).unwrap();
+    assert_eq!(entry.env.server, Support::Unsupported);
+    assert_eq!(
+        platform.pack_eligibility(&entry).unwrap(),
+        Eligibility::Eligible
+    );
 }
 
 /// Against the real API: resolve, fill, identify and download a known mod.

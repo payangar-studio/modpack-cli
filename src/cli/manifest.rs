@@ -1,7 +1,7 @@
-//! `modpack manifest`: adds the new jars of mods/ and mods-local/ to the
-//! manifest, rebuilds
-//! the entries whose jar changed and links entries to the platforms that did
-//! not know them yet. A missing jar keeps its entry.
+//! `modpack manifest`: adds the new files of mods/, resourcepacks/ and their
+//! local directories to the manifest, rebuilds the entries whose file changed
+//! and links entries to the platforms that did not know them yet. A missing
+//! file keeps its entry.
 //! Then checks `variants.toml` against the manifest, so that the `pre-commit`
 //! hook, which runs this command, stops a commit whose variants are broken.
 
@@ -17,7 +17,7 @@ use crate::platform::Registry;
 
 #[derive(Debug, clap::Args)]
 #[command(
-    after_help = "A jar missing from mods/ means \"not installed here\": its entry is kept, with a warning. `modpack install` downloads it; `modpack remove <key>` takes the mod out of the pack and its variants."
+    after_help = "A file missing from mods/ or resourcepacks/ means \"not installed here\": its entry is kept, with a warning. `modpack install` downloads it; `modpack remove <key>` takes it out of the pack and its variants."
 )]
 pub struct Args {
     /// Fail if the manifest is out of date instead of rewriting it
@@ -54,7 +54,7 @@ fn update_or_check(args: Args, root: &Path) -> Result<()> {
         }
         return Err(Error::blocked(
             format!(
-                "{FILE_NAME} does not match mods/ and mods-local/ ({} difference(s))",
+                "{FILE_NAME} does not match the repository's files ({} difference(s))",
                 gaps.len()
             ),
             format!("run `modpack manifest`, then commit {FILE_NAME}"),
@@ -66,8 +66,7 @@ fn update_or_check(args: Args, root: &Path) -> Result<()> {
         writeln!(out, "warning: {warning}")?;
     }
     if !changes.missing.is_empty() {
-        // Git holds the jars of mods-local/: `modpack install` cannot restore
-        // them.
+        // Git holds the local files: `modpack install` cannot restore them.
         let manifest = Manifest::load(&root.join(FILE_NAME))?;
         let (local, missing): (Vec<String>, Vec<String>) = changes
             .missing
@@ -77,14 +76,14 @@ fn update_or_check(args: Args, root: &Path) -> Result<()> {
         if !missing.is_empty() {
             writeln!(
                 out,
-                "warning: jar missing from mods/, entry kept (`modpack install` downloads it, `modpack remove <key>` removes the mod): {}",
+                "warning: file missing, entry kept (`modpack install` downloads it, `modpack remove <key>` removes it): {}",
                 missing.join(", ")
             )?;
         }
         if !local.is_empty() {
             writeln!(
                 out,
-                "warning: local jar missing from mods-local/, entry kept (`git checkout -- mods-local/<file>` restores it, `modpack remove <key>` removes the mod): {}",
+                "warning: local file missing, entry kept (`git checkout -- <path>` restores it, `modpack remove <key>` removes it): {}",
                 local.join(", ")
             )?;
         }
@@ -95,7 +94,7 @@ fn update_or_check(args: Args, root: &Path) -> Result<()> {
     }
     for (label, keys) in [
         ("added", &changes.added),
-        ("rebuilt, jar changed", &changes.rebuilt),
+        ("rebuilt, file changed", &changes.rebuilt),
         ("linked to more platforms", &changes.linked),
     ] {
         if !keys.is_empty() {
@@ -105,14 +104,14 @@ fn update_or_check(args: Args, root: &Path) -> Result<()> {
     if !changes.unidentified.is_empty() {
         writeln!(
             out,
-            "warning: found on no platform, give their direct URL with `modpack add mods/<jar> --url <url>`, or move their jar to mods-local/ to track it with git: {}",
+            "warning: found on no platform, give their direct URL with `modpack add <path> --url <url>`, or move their file to mods-local/ or resourcepacks-local/ to track it with git: {}",
             changes.unidentified.join(", ")
         )?;
     }
     if !changes.unapproved.is_empty() {
         writeln!(
             out,
-            "local mods not approved for publication, review each jar then run `modpack approve <key>`: {}",
+            "local files not approved for publication, review each one then run `modpack approve <key>`: {}",
             changes.unapproved.join(", ")
         )?;
     }

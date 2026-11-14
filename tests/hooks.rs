@@ -17,7 +17,7 @@ const FAKE_MODPACK: &str = "#!/bin/sh\n\
     echo \"$*\" >> \"$FAKE_LOG\"\n\
     if [ \"$1\" = manifest ]; then\n\
     \x20   [ -z \"$FAKE_FAIL\" ] || exit 1\n\
-    \x20   for jar in mods/*.jar; do [ -e \"$jar\" ] && echo \"# $jar\" >> mods.lock.toml; done\n\
+    \x20   for jar in mods/*.jar; do [ -e \"$jar\" ] && echo \"# $jar\" >> modpack.lock.toml; done\n\
     fi\n\
     exit 0\n";
 
@@ -153,7 +153,7 @@ fn a_commit_after_a_jar_added_by_hand_updates_the_manifest() {
     repo.git(&["commit", "--quiet", "-m", "config"]);
 
     assert_eq!(repo.take_calls(), ["manifest"]);
-    let committed = repo.git(&["show", "HEAD:mods.lock.toml"]);
+    let committed = repo.git(&["show", "HEAD:modpack.lock.toml"]);
     assert!(committed.contains("# mods/by-hand.jar"), "{committed}");
     assert_eq!(repo.git(&["status", "--porcelain"]), "");
 }
@@ -290,7 +290,7 @@ fn offline_the_real_hook_commits_a_local_jar_and_its_entry() {
         committed.contains("mods-local/custom-tweaks-0.3.jar"),
         "{committed}"
     );
-    let manifest = repo.git(&["show", "HEAD:mods.lock.toml"]);
+    let manifest = repo.git(&["show", "HEAD:modpack.lock.toml"]);
     assert!(manifest.contains("key = \"custom-tweaks\""), "{manifest}");
     assert!(manifest.contains("source = \"local\""), "{manifest}");
     assert!(manifest.contains("key = \"by-hand\""), "{manifest}");

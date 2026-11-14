@@ -25,7 +25,7 @@ use super::{
     ProjectName,
 };
 use crate::error::{Context, Error, Result};
-use crate::model::manifest::{Entry, Pack};
+use crate::model::manifest::{Entry, Kind, Pack};
 use crate::secrets::{SecretName, Secrets};
 
 pub use fingerprint::fingerprint;
@@ -139,8 +139,9 @@ enum Query {
 }
 
 /// Reads a slug, a project id, or a CurseForge URL
-/// (`https://www.curseforge.com/minecraft/mc-mods/<slug>[/files/<file id>]`),
-/// with the file id the URL names. `None` for a URL of another site.
+/// (`https://www.curseforge.com/minecraft/mc-mods/<slug>[/files/<file id>]`,
+/// `texture-packs` for a resource pack), with the file id the URL names.
+/// `None` for a URL of another site.
 fn parse_query(query: &str) -> Option<(Query, Option<u64>)> {
     let query = query.trim();
     let rest = query
@@ -166,7 +167,8 @@ fn parse_query(query: &str) -> Option<(Query, Option<u64>)> {
             .copied()
     };
     let file = after("files").and_then(|f| f.parse().ok());
-    let project = match (after("mc-mods"), after("projects")) {
+    let slug = after("mc-mods").or_else(|| after("texture-packs"));
+    let project = match (slug, after("projects")) {
         (Some(slug), _) => Query::Slug(slug.to_owned()),
         (None, Some(id)) => Query::Id(id.parse().ok()?),
         (None, None) => return None,
@@ -184,14 +186,27 @@ fn label(file: &File) -> String {
     format!("{} ({release}, {date})", file.display_name)
 }
 
-/// Whether a file declares the pack's Minecraft version and loader.
-fn fits(file: &File, pack: &Pack) -> bool {
+/// Whether a file declares the pack's Minecraft version and, for a mod, its
+/// loader.
+fn fits(file: &File, pack: &Pack, kind: Kind) -> bool {
     let has = |name: &str| {
         file.game_versions
             .iter()
             .any(|v| v.eq_ignore_ascii_case(name))
     };
-    has(&pack.minecraft) && has(&pack.loader)
+    has(&pack.minecraft) && (kind != Kind::Mod || has(&pack.loader))
+}
+
+/// What a project of the class `class` is; another class is refused.
+fn kind_of(class: Option<u32>, query: &str) -> Result<Kind> {
+    match class {
+        Some(api::CLASS_MODS) => Ok(Kind::Mod),
+        Some(api::CLASS_RESOURCE_PACKS) => Ok(Kind::Resourcepack),
+        _ => Err(Error::usage(
+            format!("`{query}` is neither a mod nor a resource pack on CurseForge"),
+            "modpack-cli adds mods and resource packs only",
+        )),
+    }
 }
 
 impl Platform for CurseForge {
@@ -286,18 +301,28 @@ impl Platform for CurseForge {
         let api = self.api()?;
         let found = match project {
             Query::Id(id) => api.get_mod(id)?,
-            Query::Slug(slug) => api.mod_by_slug(&slug)?,
+            Query::Slug(slug) => {
+                let mut found = None;
+                for class in [api::CLASS_MODS, api::CLASS_RESOURCE_PACKS] {
+                    found = api.mod_by_slug(&slug, class)?;
+                    if found.is_some() {
+                        break;
+                    }
+                }
+                found
+            }
         };
         let Some(m) = found else {
             return Ok(Vec::new());
         };
+        let kind = kind_of(m.class_id, query)?;
         let mut files = match file_id {
             Some(file_id) => api
                 .file(m.id, file_id)?
-                .filter(|f| fits(f, pack))
+                .filter(|f| fits(f, pack, kind))
                 .into_iter()
                 .collect(),
-            None => api.files(m.id, &pack.minecraft, loader)?,
+            None => api.files(m.id, &pack.minecraft, (kind == Kind::Mod).then_some(loader))?,
         };
         files.sort_by(|a, b| b.file_date.cmp(&a.file_date));
         Ok(files
@@ -305,6 +330,7 @@ impl Platform for CurseForge {
             .map(|f| Candidate {
                 label: label(&f),
                 slug: Some(m.slug.clone()),
+                kind,
                 section: section(f.mod_id, f.id),
                 file_name: f.file_name,
             })
@@ -349,8 +375,9 @@ impl Platform for CurseForge {
                 entry.key
             ),
             format!(
-                "download {} by hand from {page} and put it in mods/, or add the mod from a direct URL",
-                file.file_name
+                "download {} by hand from {page} and put it in {}/, or add it from a direct URL",
+                file.file_name,
+                entry.kind.dir()
             ),
         ))
     }
@@ -363,14 +390,14 @@ impl Platform for CurseForge {
             "not hosted on CurseForge: a CurseForge pack accepts it only if it is on CurseForge's approved list of third-party mods, which has no API; check it by hand".to_owned()
         } else {
             format!(
-                "no CurseForge ids in mods.lock.toml, and no CurseForge Core API key to look them up: store one with `modpack auth` or set {KEY_VAR}, then run `modpack manifest` to fill them"
+                "no CurseForge ids in modpack.lock.toml, and no CurseForge Core API key to look them up: store one with `modpack auth` or set {KEY_VAR}, then run `modpack manifest` to fill them"
             )
         };
         Ok(Eligibility::Blocked { reason })
     }
 
     fn embedded_jar_note(&self) -> Option<String> {
-        Some("a CurseForge pack accepts an embedded jar only if it is on CurseForge's approved list of third-party mods, which has no API; check it by hand".to_owned())
+        Some("a CurseForge pack accepts an embedded file only if it is on CurseForge's approved list of third-party mods, which has no API; check it by hand".to_owned())
     }
 
     fn build_pack(&self, build: &PackBuild<'_>) -> Result<PathBuf> {

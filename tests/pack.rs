@@ -11,7 +11,7 @@ use predicates::prelude::*;
 fn repo() -> tempfile::TempDir {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/repo");
     let dir = tempfile::tempdir().unwrap();
-    for file in [".modpack/socle.toml", "mods.lock.toml", "variants.toml"] {
+    for file in [".modpack/socle.toml", "modpack.lock.toml", "variants.toml"] {
         let to = dir.path().join(file);
         fs::create_dir_all(to.parent().unwrap()).unwrap();
         fs::copy(fixture.join(file), to).unwrap();

@@ -1,7 +1,7 @@
 //! The state of a pack on this machine, as `modpack status` reports it: socle
-//! version, the pack's instance, the variant loaded there, drift, jars unknown to
-//! the manifest, how `mods/` of the repository compares to the manifest, and
-//! the local mods with their approval.
+//! version, the pack's instance, the variant loaded there, drift, files unknown
+//! to the manifest, how the repository's files (mods and resource packs)
+//! compare to the manifest, and the local entries with their approval.
 //!
 //! Computing it reads files only: nothing is written, nothing goes to the
 //! network. The JSON form is a contract, documented in `docs/status.md`.
@@ -15,22 +15,22 @@ use crate::error::Result;
 use crate::model::instance::{InstanceState, Instances, disabled_in_app, drift};
 use crate::model::manifest::{self, Manifest};
 use crate::model::socle::{SocleConfig, VersionCheck, cli_version, compare_versions};
-use crate::ops::local::{LocalMod, local_mods};
+use crate::ops::local::{LocalEntry, local_entries};
 use crate::ops::manifest::is_local_path;
+use crate::store::files_in;
 use crate::store::inventory::inventory;
-use crate::store::{MODS_DIR, jars_in};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Status {
     pub socle: Socle,
     /// The pack's instance on this machine; `None` when there is none.
     pub instance: Option<Instance>,
-    /// Manifest entries whose jar is absent from `mods/` of the repository.
-    pub missing_jars: Vec<Jar>,
+    /// Manifest entries whose file is absent from the repository.
+    pub missing_files: Vec<EntryFile>,
     pub manifest: ManifestCheck,
-    /// Mods whose jar git tracks in `mods-local/`, and whether each is
-    /// approved for publication.
-    pub local_mods: Vec<LocalMod>,
+    /// Entries whose file git tracks in a local directory (`mods-local/`,
+    /// `resourcepacks-local/`), and whether each is approved for publication.
+    pub local_entries: Vec<LocalEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -59,36 +59,36 @@ pub struct Instance {
     pub variant: Option<String>,
     /// Files the CLI wrote, changed or gone since, relative to the instance.
     pub drift: Vec<String>,
-    /// Jars of `drift` the Modrinth App disabled (renamed `<jar>.disabled`).
+    /// Files of `drift` the Modrinth App disabled (renamed `<file>.disabled`).
     pub disabled: Vec<String>,
-    /// Jars of the instance's `mods/` whose hashes no manifest entry has,
-    /// but those of `outdated_jars`.
-    pub unknown_jars: Vec<UnknownJar>,
-    /// Jars the CLI wrote at an earlier load, unchanged since, that no
+    /// Files of the instance's `mods/` and `resourcepacks/` whose hashes no
+    /// manifest entry has, but those of `outdated_files`.
+    pub unknown_files: Vec<UnknownFile>,
+    /// Files the CLI wrote at an earlier load, unchanged since, that no
     /// manifest entry has any more: `modpack variant load` replaces them.
-    pub outdated_jars: Vec<OutdatedJar>,
+    pub outdated_files: Vec<OutdatedFile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct OutdatedJar {
+pub struct OutdatedFile {
     /// Relative to the instance, such as `mods/foo.jar`.
     pub path: String,
-    /// The local mod whose jar has this file name: the jar is its previous
+    /// The local entry whose file has this name: the file is its previous
     /// build.
-    pub local_mod: Option<String>,
+    pub local_entry: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct UnknownJar {
+pub struct UnknownFile {
     /// Relative to the instance, such as `mods/foo.jar`.
     pub path: String,
     pub sha1: String,
     pub sha512: String,
 }
 
-/// A manifest entry and the path of its jar.
+/// A manifest entry and the path of its file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Jar {
+pub struct EntryFile {
     pub key: String,
     pub path: String,
 }
@@ -96,12 +96,12 @@ pub struct Jar {
 /// What `modpack manifest --check` would find, by hashes only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ManifestCheck {
-    /// Whether `new_jars` or `changed` is not empty.
+    /// Whether `new_files` or `changed` is not empty.
     pub stale: bool,
-    /// Jars of `mods/` and `mods-local/` that no entry lists.
-    pub new_jars: Vec<String>,
-    /// Entries whose jar is in `mods/` with other hashes.
-    pub changed: Vec<Jar>,
+    /// Files of the repository that no entry lists.
+    pub new_files: Vec<String>,
+    /// Entries whose file is in the repository with other hashes.
+    pub changed: Vec<EntryFile>,
 }
 
 /// The status of the repository at `root`, with the machine's instances file.
@@ -117,10 +117,10 @@ pub fn status(root: &Path, instances_file: &Path) -> Result<Status> {
 
     let manifest = Manifest::load(&root.join(manifest::FILE_NAME))?;
     let inv = inventory(root, &manifest)?;
-    let jars = |keys: &[String]| -> Vec<Jar> {
+    let jars = |keys: &[String]| -> Vec<EntryFile> {
         keys.iter()
             .filter_map(|k| manifest.get(k))
-            .map(|e| Jar {
+            .map(|e| EntryFile {
                 key: e.key.clone(),
                 path: e.path.clone(),
             })
@@ -140,13 +140,13 @@ pub fn status(root: &Path, instances_file: &Path) -> Result<Status> {
             gap,
         },
         instance,
-        missing_jars: jars(&inv.missing),
+        missing_files: jars(&inv.missing),
         manifest: ManifestCheck {
             stale: !inv.unknown.is_empty() || !changed.is_empty(),
-            new_jars: inv.unknown,
+            new_files: inv.unknown,
             changed,
         },
-        local_mods: local_mods(root, &manifest)?,
+        local_entries: local_entries(root, &manifest)?,
     })
 }
 
@@ -162,26 +162,26 @@ fn instance(dir: &Path, manifest: &Manifest) -> Result<Instance> {
             disabled.push(rel.clone());
         }
     }
-    let mut unknown_jars = Vec::new();
-    let mut outdated_jars = Vec::new();
-    for (relative, hashes) in jars_in(&dir.join(MODS_DIR))? {
-        if manifest.mods.iter().any(|e| hashes.matches(&e.hashes)) {
+    let mut unknown_files = Vec::new();
+    let mut outdated_files = Vec::new();
+    for (relative, hashes) in files_in(dir)? {
+        if manifest.entries.iter().any(|e| hashes.matches(&e.hashes)) {
             continue;
         }
         // As `modpack variant load` sorts it: a jar it wrote, unchanged
         // since, is its own to replace, never the user's.
         if state.files.get(&relative) == Some(&hashes.sha256) {
-            let local_mod = manifest
-                .mods
+            let local_entry = manifest
+                .entries
                 .iter()
                 .find(|e| e.is_local() && e.instance_path() == relative)
                 .map(|e| e.key.clone());
-            outdated_jars.push(OutdatedJar {
+            outdated_files.push(OutdatedFile {
                 path: relative,
-                local_mod,
+                local_entry,
             });
         } else {
-            unknown_jars.push(UnknownJar {
+            unknown_files.push(UnknownFile {
                 path: relative,
                 sha1: hashes.sha1,
                 sha512: hashes.sha512,
@@ -193,8 +193,8 @@ fn instance(dir: &Path, manifest: &Manifest) -> Result<Instance> {
         variant: state.variant,
         drift,
         disabled,
-        unknown_jars,
-        outdated_jars,
+        unknown_files,
+        outdated_files,
     })
 }
 
@@ -238,22 +238,22 @@ impl Status {
                     "drift, files changed in the instance since the CLI wrote them",
                     &drift,
                 )?;
-                if !i.unknown_jars.is_empty() {
+                if !i.unknown_files.is_empty() {
                     writeln!(
                         out,
-                        "jars in the instance unknown to the manifest ({}):",
-                        i.unknown_jars.len()
+                        "files in the instance unknown to the manifest ({}):",
+                        i.unknown_files.len()
                     )?;
-                    for jar in &i.unknown_jars {
+                    for jar in &i.unknown_files {
                         writeln!(out, "  - {} (sha1 {})", jar.path, jar.sha1)?;
                     }
                 }
                 let outdated: Vec<String> = i
-                    .outdated_jars
+                    .outdated_files
                     .iter()
-                    .map(|jar| match &jar.local_mod {
+                    .map(|jar| match &jar.local_entry {
                         Some(key) => {
-                            format!("{}, a previous build of the local mod `{key}`", jar.path)
+                            format!("{}, a previous build of the local entry `{key}`", jar.path)
                         }
                         None => jar.path.clone(),
                     })
@@ -261,7 +261,7 @@ impl Status {
                 list(
                     out,
                     &format!(
-                        "jars an earlier load left in the instance, unknown to the manifest now; `modpack variant load {}` replaces them",
+                        "files an earlier load left in the instance, unknown to the manifest now; `modpack variant load {}` replaces them",
                         i.variant.as_deref().unwrap_or("<variant>")
                     ),
                     &outdated,
@@ -269,16 +269,15 @@ impl Status {
             }
         }
 
-        // Git holds the jars of mods-local/: `modpack install` cannot restore
-        // them.
-        let (local_missing, missing): (Vec<&Jar>, Vec<&Jar>) = self
-            .missing_jars
+        // Git holds the local files: `modpack install` cannot restore them.
+        let (local_missing, missing): (Vec<&EntryFile>, Vec<&EntryFile>) = self
+            .missing_files
             .iter()
             .partition(|j| is_local_path(&j.path));
-        let missing: Vec<String> = missing.into_iter().map(Jar::describe).collect();
+        let missing: Vec<String> = missing.into_iter().map(EntryFile::describe).collect();
         list(
             out,
-            "jars missing from mods/, run `modpack install`",
+            "files missing from the repository, run `modpack install`",
             &missing,
         )?;
         let local_missing_keys: Vec<&str> = local_missing.iter().map(|j| j.key.as_str()).collect();
@@ -286,7 +285,7 @@ impl Status {
             .into_iter()
             .map(|j| {
                 format!(
-                    "{}: restore it with `git checkout -- {}`, or take the mod out with `modpack remove {}`",
+                    "{}: restore it with `git checkout -- {}`, or take it out with `modpack remove {}`",
                     j.describe(),
                     j.path,
                     j.key
@@ -295,33 +294,33 @@ impl Status {
             .collect();
         list(
             out,
-            "local jars missing from mods-local/, held by git",
+            "local files missing from the repository, held by git",
             &local_missing,
         )?;
 
-        // The jars of mods-local/ go to the local mods section.
+        // The local files go to the local entries section.
         let m = &self.manifest;
-        let (local_new, new_jars): (Vec<&String>, Vec<&String>) =
-            m.new_jars.iter().partition(|p| is_local_path(p));
-        let (local_changed, changed): (Vec<&Jar>, Vec<&Jar>) =
+        let (local_new, new_files): (Vec<&String>, Vec<&String>) =
+            m.new_files.iter().partition(|p| is_local_path(p));
+        let (local_changed, changed): (Vec<&EntryFile>, Vec<&EntryFile>) =
             m.changed.iter().partition(|j| is_local_path(&j.path));
         if m.stale {
             writeln!(out, "manifest: stale; run `modpack manifest`")?;
-            let new_jars: Vec<String> = new_jars.into_iter().cloned().collect();
-            list(out, "jars of mods/ not in the manifest", &new_jars)?;
-            let changed: Vec<String> = changed.into_iter().map(Jar::describe).collect();
-            list(out, "jars of mods/ changed since the manifest", &changed)?;
+            let new_files: Vec<String> = new_files.into_iter().cloned().collect();
+            list(out, "files not in the manifest", &new_files)?;
+            let changed: Vec<String> = changed.into_iter().map(EntryFile::describe).collect();
+            list(out, "files changed since the manifest", &changed)?;
         } else {
-            writeln!(out, "manifest: up to date with mods/ and mods-local/")?;
+            writeln!(out, "manifest: up to date with the repository's files")?;
         }
 
         let mut local: Vec<String> = self
-            .local_mods
+            .local_entries
             .iter()
             .map(|m| {
-                // Approving needs the jar: git restores it first.
+                // Approving needs the file: git restores it first.
                 if local_missing_keys.contains(&m.key.as_str()) {
-                    format!("{} ({}), jar missing: restore it first", m.key, m.path)
+                    format!("{} ({}), file missing: restore it first", m.key, m.path)
                 } else if local_changed.iter().any(|j| j.key == m.key) {
                     format!(
                         "{} ({}), changed since the manifest: run `modpack manifest`, review it, then run `modpack approve {}`",
@@ -342,12 +341,12 @@ impl Status {
                 .into_iter()
                 .map(|p| format!("{p}, not in the manifest: run `modpack manifest`")),
         );
-        list(out, "local mods, tracked by git in mods-local/", &local)?;
+        list(out, "local mods and resource packs, tracked by git", &local)?;
         Ok(())
     }
 }
 
-impl Jar {
+impl EntryFile {
     fn describe(&self) -> String {
         format!("{} ({})", self.key, self.path)
     }
@@ -488,8 +487,8 @@ mod tests {
         assert_eq!(instance.path, setup.instance().to_string_lossy());
         assert_eq!(instance.variant.as_deref(), Some("default"));
         assert!(instance.drift.is_empty());
-        assert!(instance.unknown_jars.is_empty());
-        assert!(status.missing_jars.is_empty());
+        assert!(instance.unknown_files.is_empty());
+        assert!(status.missing_files.is_empty());
         assert!(!status.manifest.stale);
 
         let out = text(&status);
@@ -520,7 +519,7 @@ mod tests {
         let instance = status.instance.as_ref().unwrap();
         assert_eq!(instance.drift, ["mods/iris-1.0.0.jar"]);
         assert_eq!(instance.disabled, ["mods/iris-1.0.0.jar"]);
-        assert!(instance.unknown_jars.is_empty());
+        assert!(instance.unknown_files.is_empty());
         let out = text(&status);
         assert!(
             out.contains("  - mods/iris-1.0.0.jar (disabled in the app)"),
@@ -537,8 +536,8 @@ mod tests {
         let status = setup.status();
         let instance = status.instance.as_ref().unwrap();
         assert_eq!(
-            instance.unknown_jars,
-            [UnknownJar {
+            instance.unknown_files,
+            [UnknownFile {
                 path: "mods/tried-in-the-app.jar".into(),
                 sha1: "a9993e364706816aba3e25717850c26c9cd0d89d".into(),
                 sha512: "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a\
@@ -559,14 +558,14 @@ mod tests {
         fs::remove_file(setup.repo.path().join("mods/iris-1.0.0.jar")).unwrap();
         let status = setup.status();
         assert_eq!(
-            status.missing_jars,
-            [Jar {
+            status.missing_files,
+            [EntryFile {
                 key: "iris".into(),
                 path: "mods/iris-1.0.0.jar".into()
             }]
         );
         assert!(!status.manifest.stale);
-        assert!(text(&status).contains("missing from mods/, run `modpack install`"));
+        assert!(text(&status).contains("missing from the repository, run `modpack install`"));
     }
 
     #[test]
@@ -582,13 +581,13 @@ mod tests {
 
         let text = text(&setup.status());
         assert!(
-            text.contains("local jars missing from mods-local/, held by git (1):\n  - custom (mods-local/custom.jar): restore it with `git checkout -- mods-local/custom.jar`, or take the mod out with `modpack remove custom`"),
+            text.contains("local files missing from the repository, held by git (1):\n  - custom (mods-local/custom.jar): restore it with `git checkout -- mods-local/custom.jar`, or take it out with `modpack remove custom`"),
             "{text}"
         );
         assert!(!text.contains("modpack install"), "{text}");
         // Approving would fail on the missing jar: not offered.
         assert!(
-            text.contains("custom (mods-local/custom.jar), jar missing: restore it first"),
+            text.contains("custom (mods-local/custom.jar), file missing: restore it first"),
             "{text}"
         );
         assert!(!text.contains("modpack approve"), "{text}");
@@ -601,10 +600,10 @@ mod tests {
         setup.write_repo("mods/jei-1.0.0.jar", b"edited");
         let status = setup.status();
         assert!(status.manifest.stale);
-        assert_eq!(status.manifest.new_jars, ["mods/added-by-hand.jar"]);
+        assert_eq!(status.manifest.new_files, ["mods/added-by-hand.jar"]);
         assert_eq!(
             status.manifest.changed,
-            [Jar {
+            [EntryFile {
                 key: "jei".into(),
                 path: "mods/jei-1.0.0.jar".into()
             }]
@@ -627,8 +626,8 @@ mod tests {
         let status = setup.status();
         assert!(!status.manifest.stale);
         assert_eq!(
-            status.local_mods,
-            [LocalMod {
+            status.local_entries,
+            [LocalEntry {
                 key: "custom".into(),
                 path: "mods-local/custom.jar".into(),
                 approved: false
@@ -636,7 +635,7 @@ mod tests {
         );
         let out = text(&status);
         assert!(
-            out.contains("local mods, tracked by git in mods-local/ (1):"),
+            out.contains("local mods and resource packs, tracked by git (1):"),
             "{out}"
         );
         assert!(
@@ -649,12 +648,15 @@ mod tests {
         let custom = m.get_mut("custom").unwrap();
         custom.approved = Some(custom.hashes.sha512.clone());
         m.save(&path).unwrap();
-        assert!(setup.status().local_mods[0].approved);
+        assert!(setup.status().local_entries[0].approved);
         assert!(text(&setup.status()).contains("custom (mods-local/custom.jar), approved"));
 
         // A jar dropped in mods-local/ makes the manifest stale.
         setup.write_repo("mods-local/dropped.jar", b"new");
-        assert_eq!(setup.status().manifest.new_jars, ["mods-local/dropped.jar"]);
+        assert_eq!(
+            setup.status().manifest.new_files,
+            ["mods-local/dropped.jar"]
+        );
     }
 
     #[test]
@@ -673,19 +675,19 @@ mod tests {
 
         let status = setup.status();
         assert_eq!(
-            status.manifest.new_jars,
+            status.manifest.new_files,
             ["mods-local/dropped.jar", "mods/added-by-hand.jar"]
         );
         assert_eq!(status.manifest.changed[0].key, "custom");
         let out = text(&status);
         assert!(
-            out.contains("jars of mods/ not in the manifest (1):\n  - mods/added-by-hand.jar\n"),
+            out.contains("files not in the manifest (1):\n  - mods/added-by-hand.jar\n"),
             "{out}"
         );
-        assert!(!out.contains("jars of mods/ changed"), "{out}");
+        assert!(!out.contains("files changed"), "{out}");
         assert!(
             out.contains(
-                "local mods, tracked by git in mods-local/ (2):\n  \
+                "local mods and resource packs, tracked by git (2):\n  \
                  - custom (mods-local/custom.jar), changed since the manifest: run `modpack manifest`, review it, then run `modpack approve custom`\n  \
                  - mods-local/dropped.jar, not in the manifest: run `modpack manifest`\n"
             ),
@@ -717,20 +719,20 @@ mod tests {
         let status = setup.status();
         let instance = status.instance.as_ref().unwrap();
         assert_eq!(
-            instance.outdated_jars,
+            instance.outdated_files,
             [
-                OutdatedJar {
+                OutdatedFile {
                     path: "mods/custom.jar".into(),
-                    local_mod: Some("custom".into())
+                    local_entry: Some("custom".into())
                 },
-                OutdatedJar {
+                OutdatedFile {
                     path: "mods/old-1.0.jar".into(),
-                    local_mod: None
+                    local_entry: None
                 }
             ]
         );
         let unknown: Vec<&str> = instance
-            .unknown_jars
+            .unknown_files
             .iter()
             .map(|j| j.path.as_str())
             .collect();
@@ -738,8 +740,8 @@ mod tests {
         let out = text(&status);
         assert!(
             out.contains(
-                "jars an earlier load left in the instance, unknown to the manifest now; `modpack variant load default` replaces them (2):\n  \
-                 - mods/custom.jar, a previous build of the local mod `custom`\n  \
+                "files an earlier load left in the instance, unknown to the manifest now; `modpack variant load default` replaces them (2):\n  \
+                 - mods/custom.jar, a previous build of the local entry `custom`\n  \
                  - mods/old-1.0.jar\n"
             ),
             "{out}"
@@ -844,7 +846,7 @@ mod tests {
         let busy = serde_json::to_value(setup.status()).unwrap();
         assert_valid(&schema, &busy);
         assert_eq!(
-            busy["instance"]["unknown_jars"][0]["path"],
+            busy["instance"]["unknown_files"][0]["path"],
             "mods/tried.jar"
         );
 

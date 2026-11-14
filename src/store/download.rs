@@ -1,4 +1,4 @@
-//! Fetching the jar of a manifest entry into `mods/`.
+//! Fetching the file of a manifest entry into its kind's directory.
 //!
 //! Sources are tried in order: the entry's `downloads`, then every platform of
 //! the registry that has a table in the entry, then the direct `url`. What a
@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
 use super::hash::copy_hashing;
-use super::{jar_path, write_atomic};
+use super::{file_path, write_atomic};
 use crate::error::{Context, Error, Result};
 use crate::model::installed::Installed;
 use crate::model::manifest::Entry;
@@ -86,13 +86,14 @@ pub struct Attempt {
     pub error: Error,
 }
 
-/// Downloads the jar of `entry` into `<root>/mods/`, replacing the file there.
+/// Downloads the file of `entry` into its kind's directory under `root`,
+/// replacing the file there.
 pub fn download(root: &Path, entry: &Entry, sources: Sources<'_>) -> Result<(), Failure> {
     let fail = |attempts| Failure {
         key: entry.key.clone(),
         attempts,
     };
-    let dest = jar_path(root, entry).map_err(|error| {
+    let dest = file_path(root, entry).map_err(|error| {
         fail(vec![Attempt {
             source: "manifest".into(),
             error,
@@ -143,11 +144,13 @@ pub fn download(root: &Path, entry: &Entry, sources: Sources<'_>) -> Result<(), 
             source: "git".into(),
             error: Error::usage(
                 format!(
-                    "`{}` is a local mod and its jar {} is missing; git tracks it, nothing downloads it",
-                    entry.key, entry.path
+                    "`{}` is a local {} and its file {} is missing; git tracks it, nothing downloads it",
+                    entry.key,
+                    entry.noun(),
+                    entry.path
                 ),
                 format!(
-                    "restore it with `git checkout -- {}`, or take the mod out with `modpack remove {}`",
+                    "restore it with `git checkout -- {}`, or take it out with `modpack remove {}`",
                     entry.path, entry.key
                 ),
             ),
@@ -162,8 +165,9 @@ pub fn download(root: &Path, entry: &Entry, sources: Sources<'_>) -> Result<(), 
                     entry.key
                 ),
                 format!(
-                    "put the jar in mods/ by hand as {}, or add the mod again from a platform",
-                    entry.path
+                    "put the file by hand at {}, or add the {} again from a platform",
+                    entry.path,
+                    entry.noun()
                 ),
             ),
         });
@@ -214,11 +218,11 @@ pub fn download_all(
 
 fn write_verified(reader: &mut dyn Read, dest: &Path, entry: &Entry) -> Result<()> {
     write_atomic(dest, |file| {
-        let received = copy_hashing(reader, file).context("receiving the jar")?;
+        let received = copy_hashing(reader, file).context("receiving the file")?;
         if !received.matches(&entry.hashes) {
             return Err(Error::internal(
                 "the file received does not have the hashes of the manifest",
-                "this source serves another file; if the mod changed on purpose, regenerate the manifest with `modpack manifest`",
+                "this source serves another file; if it changed on purpose, regenerate the manifest with `modpack manifest`",
             ));
         }
         Ok(())
@@ -241,6 +245,7 @@ pub(crate) mod tests {
         let hashes = hash::copy_hashing(&mut &bytes[..], &mut io::sink()).unwrap();
         Entry {
             key: key.to_owned(),
+            kind: crate::model::manifest::Kind::Mod,
             path: format!("mods/{key}-1.0.0.jar"),
             file_size: hashes.size,
             downloads: Vec::new(),

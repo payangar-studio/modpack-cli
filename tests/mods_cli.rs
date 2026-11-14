@@ -23,7 +23,7 @@ const SOCLE: &str = "version = \"0.1.0\"\n\n[init]\nname = \"P\"\nminecraft = \"
 
 /// sha1 and sha512 of "abc".
 const MANIFEST: &str = "[pack]\nminecraft = \"1.21.1\"\nloader = \"neoforge\"\nloader-version = \"21.1.77\"\n\n\
-    [[mods]]\nkey = \"abc\"\npath = \"mods/abc.jar\"\nfileSize = 3\ndownloads = []\n\n[mods.hashes]\n\
+    [[entries]]\nkey = \"abc\"\ntype = \"mod\"\npath = \"mods/abc.jar\"\nfileSize = 3\ndownloads = []\n\n[entries.hashes]\n\
     sha1 = \"a9993e364706816aba3e25717850c26c9cd0d89d\"\n\
     sha512 = \"ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f\"\n";
 
@@ -34,7 +34,7 @@ fn repo() -> tempfile::TempDir {
     let repo = tempfile::tempdir().unwrap();
     fs::create_dir_all(repo.path().join(".modpack")).unwrap();
     fs::write(repo.path().join(".modpack/socle.toml"), SOCLE).unwrap();
-    fs::write(repo.path().join("mods.lock.toml"), MANIFEST).unwrap();
+    fs::write(repo.path().join("modpack.lock.toml"), MANIFEST).unwrap();
     fs::write(repo.path().join("variants.toml"), VARIANTS).unwrap();
     fs::create_dir_all(repo.path().join("mods")).unwrap();
     fs::write(repo.path().join("mods/abc.jar"), b"abc").unwrap();
@@ -56,7 +56,7 @@ fn manifest_stops_on_variants_that_do_not_match_it() {
             .assert()
             .code(2)
             .stderr(predicate::str::contains(
-                "variants.toml: inconsistent with mods.lock.toml:\n  - variant `extra` names `ghost`",
+                "variants.toml: inconsistent with modpack.lock.toml:\n  - variant `extra` names `ghost`",
             ));
     }
 
@@ -87,10 +87,10 @@ fn manifest_check_passes_when_up_to_date_and_fails_on_a_jar_added_by_hand() {
         .args(["manifest", "--check"])
         .assert()
         .code(3)
-        .stdout(predicate::str::contains("new jar: mods/by-hand.jar"))
+        .stdout(predicate::str::contains("new file: mods/by-hand.jar"))
         .stderr(predicate::str::contains("modpack manifest"));
     assert_eq!(
-        fs::read_to_string(repo.path().join("mods.lock.toml")).unwrap(),
+        fs::read_to_string(repo.path().join("modpack.lock.toml")).unwrap(),
         MANIFEST,
         "--check writes nothing"
     );
@@ -106,7 +106,7 @@ fn remove_cleans_the_manifest_mods_and_variants() {
         .success()
         .stdout(predicate::str::contains("removed `abc`"));
     assert!(!repo.path().join("mods/abc.jar").exists());
-    let manifest = fs::read_to_string(repo.path().join("mods.lock.toml")).unwrap();
+    let manifest = fs::read_to_string(repo.path().join("modpack.lock.toml")).unwrap();
     assert!(!manifest.contains("abc"), "{manifest}");
     assert_eq!(
         fs::read_to_string(repo.path().join("variants.toml")).unwrap(),
@@ -136,10 +136,10 @@ fn manifest_points_a_missing_local_jar_to_git() {
         .success()
         .stdout(
             predicate::str::contains(
-                "warning: local jar missing from mods-local/, entry kept (`git checkout -- mods-local/<file>` restores it, `modpack remove <key>` removes the mod): custom",
+                "warning: local file missing, entry kept (`git checkout -- <path>` restores it, `modpack remove <key>` removes it): custom",
             )
-            // The jar of mods/ only: `modpack install` cannot restore a local one.
-            .and(predicate::str::contains("removes the mod): abc\n")),
+            // The downloaded file only: `modpack install` cannot restore a local one.
+            .and(predicate::str::contains("removes it): abc\n")),
         );
 }
 
@@ -154,7 +154,7 @@ fn manifest_keeps_the_entry_of_a_missing_jar() {
         .success()
         .stdout(predicate::str::contains("entry kept").and(predicate::str::contains("abc")));
     assert_eq!(
-        fs::read_to_string(repo.path().join("mods.lock.toml")).unwrap(),
+        fs::read_to_string(repo.path().join("modpack.lock.toml")).unwrap(),
         MANIFEST
     );
     assert_eq!(
@@ -177,7 +177,7 @@ fn remove_of_a_mod_whose_jar_is_missing_cleans_the_manifest_and_variants() {
         .assert()
         .success()
         .stdout(predicate::str::contains("removed `abc` from the variants"));
-    let manifest = fs::read_to_string(repo.path().join("mods.lock.toml")).unwrap();
+    let manifest = fs::read_to_string(repo.path().join("modpack.lock.toml")).unwrap();
     assert!(!manifest.contains("abc"), "{manifest}");
     assert!(
         !fs::read_to_string(repo.path().join("variants.toml"))
@@ -194,7 +194,7 @@ fn remove_of_an_unknown_key_is_a_usage_error() {
         .args(["remove", "nope"])
         .assert()
         .code(2)
-        .stderr(predicate::str::contains("no mod `nope`"));
+        .stderr(predicate::str::contains("no entry `nope`"));
 }
 
 #[test]

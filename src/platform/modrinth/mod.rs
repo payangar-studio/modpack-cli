@@ -21,7 +21,7 @@ use super::{
     ProjectName,
 };
 use crate::error::{Error, Result};
-use crate::model::manifest::{Entry, Env, Pack, Support};
+use crate::model::manifest::{Entry, Env, Kind, Pack, Support};
 use crate::secrets::{SecretName, Secrets};
 use client::Client;
 
@@ -148,8 +148,20 @@ impl Platform for Modrinth {
         let Some(project) = self.project(&id)? else {
             return Ok(Vec::new());
         };
+        // A resource pack's versions list the loader `minecraft`, not the
+        // pack's mod loader.
+        let (kind, loader) = match project.project_type.as_str() {
+            "mod" => (Kind::Mod, pack.loader.as_str()),
+            "resourcepack" => (Kind::Resourcepack, "minecraft"),
+            other => {
+                return Err(Error::usage(
+                    format!("`{query}` is a {other} on Modrinth, not a mod nor a resource pack"),
+                    "modpack-cli adds mods and resource packs only",
+                ));
+            }
+        };
         let game_versions = serde_json::to_string(&[&pack.minecraft])?;
-        let loaders = serde_json::to_string(&[&pack.loader])?;
+        let loaders = serde_json::to_string(&[loader])?;
         let mut versions: Vec<Version> = self
             .client
             .get(
@@ -170,6 +182,7 @@ impl Platform for Modrinth {
                 Some(Candidate {
                     label: v.version_number.clone(),
                     slug: Some(project.slug.clone()),
+                    kind,
                     file_name: file.filename.clone(),
                     section: section(&project.id, &v.id),
                 })
@@ -190,7 +203,7 @@ impl Platform for Modrinth {
         .ok_or_else(|| {
             Error::usage(
                 format!(
-                    "the jar of `{}` is not a file of its Modrinth version `{}`",
+                    "the file of `{}` is not a file of its Modrinth version `{}`",
                     entry.key, version.id
                 ),
                 format!("add `{}` again from Modrinth", entry.key),
@@ -272,7 +285,7 @@ impl Platform for Modrinth {
         Ok(if mrpack::allowed_downloads(entry).is_empty() {
             Eligibility::Blocked {
                 reason: format!(
-                    "no download URL from {}: the jar must be embedded in the pack, with its author's permission",
+                    "no download URL from {}: the file must be embedded in the pack, with its author's permission",
                     mrpack::ALLOWED_HOSTS.join(", ")
                 ),
             }
@@ -354,6 +367,9 @@ fn encode_segment(raw: &str) -> String {
 struct Project {
     id: String,
     slug: String,
+    /// `mod`, `resourcepack`, `shader`, `modpack`...
+    #[serde(default)]
+    project_type: String,
     #[serde(default)]
     title: String,
     client_side: String,

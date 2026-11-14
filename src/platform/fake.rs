@@ -1,4 +1,5 @@
-//! An in-memory platform for tests: it knows the mods it is given, never
+//! An in-memory platform for tests: it knows the mods and resource packs it
+//! is given, never
 //! touches the network, and writes a plain-text "pack".
 //!
 //! Its manifest table holds `id` (the slug) and, once filled, `dependencies`
@@ -15,12 +16,13 @@ use super::{
     ProjectName,
 };
 use crate::error::{Error, Result};
-use crate::model::manifest::{Entry, Env, Pack};
+use crate::model::manifest::{Entry, Env, Kind, Pack};
 
-/// A mod the fake platform hosts.
+/// A mod, or a resource pack, the fake platform hosts.
 #[derive(Debug, Clone)]
 pub struct FakeMod {
     pub slug: String,
+    pub kind: Kind,
     pub title: String,
     pub file_name: String,
     pub bytes: Vec<u8>,
@@ -35,11 +37,23 @@ impl FakeMod {
     pub fn new(slug: &str) -> Self {
         Self {
             slug: slug.to_owned(),
+            kind: Kind::Mod,
             title: format!("Title of {slug}"),
             file_name: format!("{slug}-1.0.0.jar"),
             bytes: slug.as_bytes().to_vec(),
             env: Env::default(),
             dependencies: Vec::new(),
+        }
+    }
+
+    /// A resource pack whose file is `<slug>-1.0.0.zip` holding its slug as
+    /// bytes, client only, as Modrinth lists resource packs.
+    pub fn resource_pack(slug: &str) -> Self {
+        Self {
+            kind: Kind::Resourcepack,
+            file_name: format!("{slug}-1.0.0.zip"),
+            env: Kind::Resourcepack.default_env(),
+            ..Self::new(slug)
         }
     }
 
@@ -130,6 +144,7 @@ impl Platform for FakePlatform {
             .map(|m| Candidate {
                 label: m.file_name.clone(),
                 slug: Some(m.slug.clone()),
+                kind: m.kind,
                 file_name: m.file_name.clone(),
                 section: m.section(),
             })
@@ -184,7 +199,7 @@ impl Platform for FakePlatform {
             format!("version {}", build.version),
             format!("minecraft {}", build.pack.minecraft),
         ];
-        lines.extend(build.mods.iter().map(|e| format!("mod {}", e.key)));
+        lines.extend(build.entries.iter().map(|e| format!("mod {}", e.key)));
         lines.extend(
             build
                 .overrides
@@ -226,7 +241,8 @@ mod tests {
     fn entry_from(candidate: &Candidate) -> Entry {
         Entry {
             key: candidate.slug.clone().unwrap(),
-            path: format!("mods/{}", candidate.file_name),
+            kind: candidate.kind,
+            path: format!("{}/{}", candidate.kind.dir(), candidate.file_name),
             file_size: 0,
             downloads: Vec::new(),
             url: None,
@@ -311,7 +327,7 @@ mod tests {
                 name: "Test",
                 version: "1.0.0",
                 pack: &pack,
-                mods: vec![&hosted],
+                entries: vec![&hosted],
                 overrides: Vec::new(),
                 out_dir: dir.path(),
                 file_stem: "test-default-1.0.0",

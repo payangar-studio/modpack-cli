@@ -41,10 +41,10 @@ fn install_on_a_complete_stock_downloads_nothing() {
     // sha1 and sha512 of "abc"; the download URL does not resolve, so any
     // attempt to fetch it would fail the command.
     fs::write(
-        repo.path().join("mods.lock.toml"),
+        repo.path().join("modpack.lock.toml"),
         "[pack]\nminecraft = \"1.21.1\"\nloader = \"neoforge\"\nloader-version = \"21.1.77\"\n\n\
-         [[mods]]\nkey = \"abc\"\npath = \"mods/abc.jar\"\nfileSize = 3\n\
-         downloads = [\"https://modpack-cli.invalid/abc.jar\"]\n\n[mods.hashes]\n\
+         [[entries]]\nkey = \"abc\"\ntype = \"mod\"\npath = \"mods/abc.jar\"\nfileSize = 3\n\
+         downloads = [\"https://modpack-cli.invalid/abc.jar\"]\n\n[entries.hashes]\n\
          sha1 = \"a9993e364706816aba3e25717850c26c9cd0d89d\"\n\
          sha512 = \"ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f\"\n",
     )
@@ -57,6 +57,6 @@ fn install_on_a_complete_stock_downloads_nothing() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "jars: 1 present, 0 downloaded, 0 failed",
+            "files: 1 present, 0 downloaded, 0 failed",
         ));
 }

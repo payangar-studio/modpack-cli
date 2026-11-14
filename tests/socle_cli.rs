@@ -72,7 +72,7 @@ fn init_creates_a_complete_repository() {
         ".modpack/socle.toml",
         ".modpack/socle.lock",
         ".modpack/README.md",
-        "mods.lock.toml",
+        "modpack.lock.toml",
         "variants.toml",
         "AGENTS.md",
         ".gitignore",
@@ -80,10 +80,10 @@ fn init_creates_a_complete_repository() {
     ] {
         assert!(root.join(path).exists(), "{path} missing");
     }
-    for dir in ["mods", "config", "overrides", ".git"] {
+    for dir in ["mods", "resourcepacks", "config", "overrides", ".git"] {
         assert!(root.join(dir).is_dir(), "{dir}/ missing");
     }
-    assert!(read(&root, "mods.lock.toml").contains("loader-version = \"21.1.77\""));
+    assert!(read(&root, "modpack.lock.toml").contains("loader-version = \"21.1.77\""));
     assert!(read(&root, ".gitignore").contains("# modpack:begin\nmods/*.jar\n"));
 
     let lock = SocleLock::load(&root).unwrap();
@@ -216,7 +216,7 @@ fn update_replaces_a_block_and_keeps_the_text_around_it() {
     let mut lock = SocleLock::load(&root).unwrap();
     let old = "mods/*.jar\n";
     let text = read(&root, ".gitignore").replace(
-        "mods/*.jar\n!mods-local/*.jar\n.source/\n.modpack/local/\ndist/\n",
+        "mods/*.jar\n!mods-local/*.jar\nresourcepacks/*.zip\n!resourcepacks-local/*.zip\n.source/\n.modpack/local/\ndist/\n",
         old,
     );
     fs::write(root.join(".gitignore"), text).unwrap();
@@ -247,7 +247,7 @@ fn update_appends_a_missing_block_to_the_end_of_the_file() {
     modpack(&root).arg("update").assert().success();
     assert_eq!(
         read(&root, ".gitignore"),
-        "target/\n\n# modpack:begin\nmods/*.jar\n!mods-local/*.jar\n.source/\n.modpack/local/\ndist/\n# modpack:end\n"
+        "target/\n\n# modpack:begin\nmods/*.jar\n!mods-local/*.jar\nresourcepacks/*.zip\n!resourcepacks-local/*.zip\n.source/\n.modpack/local/\ndist/\n# modpack:end\n"
     );
 }
 
@@ -282,12 +282,12 @@ fn update_never_touches_the_pack_skeleton() {
     make_older(&root);
     fs::write(root.join("variants.toml"), "# mine\n").unwrap();
     fs::remove_file(root.join("mods/.gitkeep")).unwrap();
-    let manifest = read(&root, "mods.lock.toml");
+    let manifest = read(&root, "modpack.lock.toml");
 
     modpack(&root).arg("update").assert().success();
     assert_eq!(read(&root, "variants.toml"), "# mine\n");
     assert!(!root.join("mods/.gitkeep").exists());
-    assert_eq!(read(&root, "mods.lock.toml"), manifest);
+    assert_eq!(read(&root, "modpack.lock.toml"), manifest);
 }
 
 #[test]

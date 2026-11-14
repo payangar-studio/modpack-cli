@@ -91,12 +91,25 @@ mod tests {
         assert!(runs_from(OsStr::new("java"), &inside, &dirs));
     }
 
+    /// Kills and reaps the child when dropped, so that a failing test does
+    /// not leave it running.
+    #[cfg(target_os = "linux")]
+    struct Reaped(std::process::Child);
+
+    #[cfg(target_os = "linux")]
+    impl Drop for Reaped {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
     /// Starts a real process named `java` whose command line holds the
     /// instance directory, and checks the system detector sees it.
     #[cfg(target_os = "linux")]
     #[test]
     fn detects_a_fake_minecraft_process() {
-        use std::process::Command;
+        use std::process::{Command, Stdio};
         use std::time::{Duration, Instant};
 
         let dir = tempfile::tempdir().unwrap();
@@ -106,12 +119,16 @@ mod tests {
         std::fs::create_dir_all(&other).unwrap();
         let java = dir.path().join("java");
         std::os::unix::fs::symlink("/bin/sh", &java).unwrap();
-        // `; :` keeps the shell from replacing itself with `sleep`.
-        let mut child = Command::new(&java)
-            .args(["-c", "sleep 30; :", "sh", "--gameDir"])
-            .arg(&instance)
-            .spawn()
-            .unwrap();
+        // The shell waits on its piped stdin with the builtin `read`: no
+        // grandchild that killing the shell would leave behind.
+        let child = Reaped(
+            Command::new(&java)
+                .args(["-c", "read _", "sh", "--gameDir"])
+                .arg(&instance)
+                .stdin(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
 
         let deadline = Instant::now() + Duration::from_secs(5);
         let mut seen = false;
@@ -122,8 +139,7 @@ mod tests {
             }
         }
         let other_seen = Processes.is_running(&other).unwrap();
-        child.kill().unwrap();
-        child.wait().unwrap();
+        drop(child);
 
         assert!(seen, "the fake Minecraft process was not detected");
         assert!(!other_seen);

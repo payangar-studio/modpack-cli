@@ -53,11 +53,11 @@ impl World {
             .assert()
             .success();
         fs::write(
-            world.root.join("mods.lock.toml"),
+            world.root.join("modpack.lock.toml"),
             format!(
                 "[pack]\nminecraft = \"1.21.1\"\nloader = \"neoforge\"\nloader-version = \"21.1.77\"\n\n\
-                 [[mods]]\nkey = \"abc\"\npath = \"mods/abc.jar\"\nfileSize = 3\n\
-                 downloads = [\"{}/abc.jar\"]\n\n[mods.hashes]\nsha1 = \"{SHA1}\"\nsha512 = \"{SHA512}\"\n",
+                 [[entries]]\nkey = \"abc\"\ntype = \"mod\"\npath = \"mods/abc.jar\"\nfileSize = 3\n\
+                 downloads = [\"{}/abc.jar\"]\n\n[entries.hashes]\nsha1 = \"{SHA1}\"\nsha512 = \"{SHA512}\"\n",
                 server.url()
             ),
         )

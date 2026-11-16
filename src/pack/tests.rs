@@ -6,6 +6,7 @@ use tempfile::TempDir;
 
 use super::*;
 use crate::error::ErrorKind;
+use crate::model::manifest::Kind;
 use crate::platform::fake::FakePlatform;
 
 /// The built-in platforms, CurseForge with a key: packing never calls its
@@ -394,7 +395,7 @@ fn report_serializes_for_machines() {
                 reason: "why".into(),
             }],
         }],
-        local: vec![LocalMod {
+        local: vec![LocalEntry {
             key: "custom".into(),
             path: "mods-local/custom.jar".into(),
             approved: false,
@@ -428,7 +429,13 @@ fn report_serializes_for_machines() {
 /// Adds the local mod `custom` to the repository: its jar in `mods-local/`
 /// and its entry, approved when `approved`.
 fn add_local(root: &Path, approved: bool) {
-    let jar = root.join("mods-local/custom-1.0.jar");
+    add_local_entry(root, Kind::Mod, "mods-local/custom-1.0.jar", approved);
+}
+
+/// Adds the local entry `custom` of `kind`, its file at `rel` holding
+/// "custom jar".
+fn add_local_entry(root: &Path, kind: Kind, rel: &str, approved: bool) {
+    let jar = root.join(rel);
     fs::create_dir_all(jar.parent().unwrap()).unwrap();
     fs::write(&jar, "custom jar").unwrap();
     let hashes = hash_file(&jar).unwrap();
@@ -436,7 +443,8 @@ fn add_local(root: &Path, approved: bool) {
     let mut manifest = Manifest::load(&path).unwrap();
     manifest.upsert(Entry {
         key: "custom".into(),
-        path: "mods-local/custom-1.0.jar".into(),
+        kind,
+        path: rel.into(),
         file_size: hashes.size,
         downloads: Vec::new(),
         url: None,
@@ -489,7 +497,7 @@ fn a_local_mod_is_embedded_in_every_pack_with_a_warning() {
 
     assert_eq!(
         report.local,
-        [LocalMod {
+        [LocalEntry {
             key: "custom".into(),
             path: "mods-local/custom-1.0.jar".into(),
             approved: false
@@ -509,6 +517,48 @@ fn a_local_mod_is_embedded_in_every_pack_with_a_warning() {
         "{:?}",
         report.warnings
     );
+}
+
+#[test]
+fn resource_packs_are_packed_at_their_place_in_an_instance() {
+    let repo = repo(|manifest| {
+        everywhere(manifest);
+        // Sodium, downloadable from Modrinth, played by a resource pack.
+        let sodium = manifest.get_mut("sodium").unwrap();
+        sodium.kind = Kind::Resourcepack;
+        sodium.path = "resourcepacks/sodium.zip".into();
+    });
+    add_local_entry(
+        repo.path(),
+        Kind::Resourcepack,
+        "resourcepacks-local/custom.zip",
+        true,
+    );
+    let out = repo.path().join("dist");
+    let report = build(
+        repo.path(),
+        &registry(),
+        &Request {
+            variant: Some("default"),
+            ..request(&out)
+        },
+    )
+    .unwrap();
+    assert_eq!(report.artifacts.len(), 2, "{:?}", report.blocked);
+    for artifact in &report.artifacts {
+        let files = unzip(&artifact.path);
+        assert_eq!(overrides(&files)["resourcepacks/custom.zip"], "custom jar");
+    }
+    let mrpack = unzip(&out.join("fixture-pack-default-1.2.3.mrpack"));
+    let index: Value = serde_json::from_str(&mrpack["modrinth.index.json"]).unwrap();
+    let paths: Vec<&str> = index["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["path"].as_str().unwrap())
+        .collect();
+    assert!(paths.contains(&"resourcepacks/sodium.zip"), "{paths:?}");
+    assert_eq!(report.local[0].path, "resourcepacks-local/custom.zip");
 }
 
 #[test]

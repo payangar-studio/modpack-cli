@@ -27,7 +27,7 @@ pub fn side(side: Side, manifest: &Manifest, variant: &Resolved) -> Status {
         Status::Passed
     } else {
         Status::Failed(format!(
-            "not supported on the {name} side, after their env in mods.lock.toml: {}",
+            "not supported on the {name} side, after their env in modpack.lock.toml: {}",
             refused.join(", ")
         ))
     }
@@ -52,7 +52,7 @@ fn refusing<'m>(
 pub fn deps_complete(manifest: &Manifest, variant: &Resolved) -> Status {
     // Platform name, then project id, to manifest key.
     let mut projects: BTreeMap<&str, BTreeMap<String, &str>> = BTreeMap::new();
-    for entry in &manifest.mods {
+    for entry in &manifest.entries {
         for (platform, table) in &entry.platforms {
             if let Some(id) = PROJECT_ID_FIELDS
                 .iter()
@@ -84,7 +84,7 @@ pub fn deps_complete(manifest: &Manifest, variant: &Resolved) -> Status {
                     }
                     None => {
                         missing.insert(format!(
-                            "`{}` needs the {platform} project `{id}`, which no mod of mods.lock.toml is",
+                            "`{}` needs the {platform} project `{id}`, which no entry of modpack.lock.toml is",
                             entry.key
                         ));
                     }
@@ -202,7 +202,7 @@ pub(super) mod tests {
         let reason = failure(deps_complete(&manifest, &variant));
         assert_eq!(
             reason,
-            "`jei` needs the curseforge project `306612`, which no mod of mods.lock.toml is"
+            "`jei` needs the curseforge project `306612`, which no entry of modpack.lock.toml is"
         );
     }
 

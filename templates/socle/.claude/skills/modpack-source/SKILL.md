@@ -11,7 +11,7 @@ allowed-tools:
 
 # Mod sources
 
-Each modpack repository has its own `.source/` folder, ignored by git, where the source code of the pack's mods is cloned to be read. There is no central store: a clone lives in `.source/<key>/`, where `<key>` is the mod's key in `mods.lock.toml`, and git itself records which version is checked out.
+Each modpack repository has its own `.source/` folder, ignored by git, where the source code of the pack's mods is cloned to be read. There is no central store: a clone lives in `.source/<key>/`, where `<key>` is the mod's key in `modpack.lock.toml`, and git itself records which version is checked out.
 
 ## Rules
 
@@ -34,8 +34,8 @@ If it is not ignored, stop: the socle block of `.gitignore` is missing. Tell the
 
 ### 2. Read the pack and the mod
 
-- The pack's target is the `[pack]` table of `mods.lock.toml`: `minecraft`, `loader`, `loader-version`.
-- Find the mod's entry: `grep -n -A 25 'key = "<key>"' mods.lock.toml`. When the user names a mod rather than a key, search the keys and paths of the manifest for it. Note the entry's `path`, its `[mods.modrinth]` table (`project_id`, `version_id`) and its `[mods.curseforge]` table (`projectID`, `fileID`), when present.
+- The pack's target is the `[pack]` table of `modpack.lock.toml`: `minecraft`, `loader`, `loader-version`.
+- Find the mod's entry: `grep -n -A 25 'key = "<key>"' modpack.lock.toml`. When the user names a mod rather than a key, search the keys and paths of the manifest for it. Note the entry's `path`, its `[entries.modrinth]` table (`project_id`, `version_id`) and its `[entries.curseforge]` table (`projectID`, `fileID`), when present.
 - A mod that is not in the manifest is not part of the pack. Ask the user for its Modrinth or CurseForge page, or its repository, and use its slug as the key. Everything else is the same.
 
 If `.source/<key>/` already exists and is checked out on a tag that matches the mod's version (step 5), go straight to step 7: a tag does not move.
@@ -104,4 +104,4 @@ Start the answer with what was read, for example `sodium @ mc1.21.1-0.8.13 (dae4
 
 ## Cleaning up
 
-A mod removed from the pack leaves its clone behind. When you notice a folder of `.source/` whose key is no longer in `mods.lock.toml`, suggest deleting it; delete it once the user agrees.
+A mod removed from the pack leaves its clone behind. When you notice a folder of `.source/` whose key is no longer in `modpack.lock.toml`, suggest deleting it; delete it once the user agrees.

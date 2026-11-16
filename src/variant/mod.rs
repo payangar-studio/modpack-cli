@@ -2,14 +2,15 @@
 //!
 //! The repository feeds the instance one way. Loading a variant, in this order:
 //! finds the pack's instance, refuses while Minecraft runs from it, stops on
-//! drift unless forced, resolves the variant, then puts the variant's jars in the
-//! instance's `mods/`, writes the base config and the variant's overrides into
+//! drift unless forced, resolves the variant, then puts the variant's files in
+//! the instance (jars in `mods/`, resource packs in `resourcepacks/`), writes
+//! the base config and the variant's overrides into
 //! its `config/`, removes the config files it wrote that the variant does not
 //! have, and records what it wrote in `.modpack-state.toml`.
 //!
-//! A jar of the instance is identified by its hashes. Only jars the manifest
-//! knows are ever removed; any other jar is the user's, tried from the app,
-//! and is never touched.
+//! A file of the instance's `mods/` or `resourcepacks/` is identified by its
+//! hashes. Only files the manifest knows are ever removed; any other file is
+//! the user's, tried from the app, and is never touched.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -28,7 +29,7 @@ use crate::ops::local::restore_hint;
 use crate::store::download::{Sources, download_all};
 use crate::store::hash::hash_file;
 use crate::store::inventory::inventory;
-use crate::store::{MODS_DIR, jar_path, jars_in, write_atomic};
+use crate::store::{file_path, files_in, write_atomic};
 
 /// Base config, in the repository and in the instance.
 pub const CONFIG_DIR: &str = "config";
@@ -47,7 +48,7 @@ pub struct LoadContext<'a> {
     pub instances_file: &'a Path,
     /// Tells whether Minecraft runs from the instance.
     pub game: &'a dyn GameDetector,
-    /// Where jars missing from the repository's `mods/` are downloaded from.
+    /// Where files missing from the repository are downloaded from.
     pub sources: Sources<'a>,
 }
 
@@ -56,13 +57,13 @@ pub struct LoadContext<'a> {
 pub struct LoadReport {
     pub variant: String,
     pub instance: PathBuf,
-    /// Keys of the variant's mods downloaded into the repository's `mods/`.
+    /// Keys of the variant's entries downloaded into the repository.
     pub downloaded: Vec<String>,
-    /// Jars copied into the instance.
+    /// Files copied into the instance.
     pub copied: Vec<String>,
-    /// Jars of the manifest outside the variant, removed from the instance.
+    /// Files of the manifest outside the variant, removed from the instance.
     pub removed: Vec<String>,
-    /// Jars unknown to the manifest, left as they are.
+    /// Files unknown to the manifest, left as they are.
     pub unknown: Vec<String>,
     /// Config files written into the instance: new, or with other content.
     pub written: Vec<String>,
@@ -73,8 +74,8 @@ pub struct LoadReport {
 }
 
 /// Loads `variant` into the pack's instance. `force` goes past files of the
-/// instance changed since the CLI wrote them, and past foreign jars sitting
-/// where a jar of the variant goes.
+/// instance changed since the CLI wrote them, and past foreign files sitting
+/// where a file of the variant goes.
 pub fn load(ctx: &LoadContext<'_>, variant: &str, force: bool) -> Result<LoadReport> {
     let root = ctx.root;
     // The variant first: an unknown variant is reported before a missing instance.
@@ -123,7 +124,7 @@ pub fn load(ctx: &LoadContext<'_>, variant: &str, force: bool) -> Result<LoadRep
         .collect();
     let in_variant: BTreeSet<&str> = resolved.keys.iter().map(String::as_str).collect();
 
-    // Sort the instance's jars: the variant's, other known ones, unknown ones.
+    // Sort the instance's files: the variant's, other known ones, unknown ones.
     let mut new_state = InstanceState {
         variant: Some(variant.to_owned()),
         ..Default::default()
@@ -131,15 +132,15 @@ pub fn load(ctx: &LoadContext<'_>, variant: &str, force: bool) -> Result<LoadRep
     let mut present = BTreeSet::new();
     let mut to_remove = Vec::new();
     let mut unknown = Vec::new();
-    for (rel, hashes) in jars_in(&instance.join(MODS_DIR))? {
-        match manifest.mods.iter().find(|e| hashes.matches(&e.hashes)) {
+    for (rel, hashes) in files_in(&instance)? {
+        match manifest.entries.iter().find(|e| hashes.matches(&e.hashes)) {
             Some(e) if in_variant.contains(e.key.as_str()) => {
                 present.insert(e.key.as_str());
-                new_state.mods.insert(rel.clone(), e.key.clone());
+                new_state.entries.insert(rel.clone(), e.key.clone());
                 new_state.files.insert(rel, hashes.sha256);
             }
             Some(_) => to_remove.push(rel),
-            // A jar the CLI wrote, unchanged since, whose mod the manifest
+            // A file the CLI wrote, unchanged since, whose entry the manifest
             // dropped or updated: the CLI's to remove, never the user's.
             None if state.files.get(&rel) == Some(&hashes.sha256) => to_remove.push(rel),
             None => unknown.push(rel),
@@ -147,10 +148,10 @@ pub fn load(ctx: &LoadContext<'_>, variant: &str, force: bool) -> Result<LoadRep
     }
     let mut to_copy = Vec::new();
     for entry in wanted.iter().filter(|e| !present.contains(e.key.as_str())) {
-        to_copy.push((jar_path(root, entry)?, entry.instance_path(), &entry.key));
+        to_copy.push((file_path(root, entry)?, entry.instance_path(), &entry.key));
     }
 
-    // A foreign file where a jar of the variant goes is never overwritten silently.
+    // A foreign file where a file of the variant goes is never overwritten silently.
     let in_the_way: Vec<String> = to_copy
         .iter()
         .map(|(_, rel, _)| rel.clone())
@@ -159,11 +160,11 @@ pub fn load(ctx: &LoadContext<'_>, variant: &str, force: bool) -> Result<LoadRep
     if !in_the_way.is_empty() && !force {
         return Err(Error::blocked(
             format!(
-                "{} jar(s) of the instance unknown to the manifest sit where a jar of the variant goes:{}",
+                "{} file(s) of the instance unknown to the manifest sit where a file of the variant goes:{}",
                 in_the_way.len(),
                 bullets(&in_the_way)
             ),
-            "move them out of the instance's mods/, or rerun with --force to overwrite them",
+            "move them out of the instance, or rerun with --force to overwrite them",
         ));
     }
     unknown.retain(|rel| !in_the_way.contains(rel));
@@ -213,11 +214,11 @@ pub fn load(ctx: &LoadContext<'_>, variant: &str, force: bool) -> Result<LoadRep
     for (source, rel, key) in to_copy {
         copy_file(&source, &instance.join(&rel))?;
         new_state.record(&instance, &rel)?;
-        new_state.mods.insert(rel.clone(), key.clone());
+        new_state.entries.insert(rel.clone(), key.clone());
         report.copied.push(rel);
     }
-    // Forced past a jar the app disabled: the repository wins, so the jar is
-    // back (when the variant has it) and its disabled copy goes.
+    // Forced past a file the app disabled: the repository wins, so the file
+    // is back (when the variant has it) and its disabled copy goes.
     for rel in disabled {
         let path = instance.join(format!("{rel}{DISABLED_SUFFIX}"));
         fs::remove_file(&path).context(format!("removing {}", path.display()))?;
@@ -252,17 +253,18 @@ pub fn load(ctx: &LoadContext<'_>, variant: &str, force: bool) -> Result<LoadRep
 }
 
 /// What loading a variant leaves in the instance, by path relative to it: its
-/// config files, by their source in the repository, and its jars, by their
-/// manifest hashes. Also the keys of its mods.
+/// config files, by their source in the repository, and the files of its
+/// entries (jars, resource packs), by their manifest hashes. Also the keys of
+/// its entries.
 pub struct Expected {
     configs: BTreeMap<String, PathBuf>,
-    jars: BTreeMap<String, Hashes>,
+    files: BTreeMap<String, Hashes>,
     keys: BTreeSet<String>,
 }
 
 impl Expected {
     fn new(manifest: &Manifest, resolved: &Resolved, configs: BTreeMap<String, PathBuf>) -> Self {
-        let jars = resolved
+        let files = resolved
             .keys
             .iter()
             .filter_map(|k| manifest.get(k))
@@ -270,7 +272,7 @@ impl Expected {
             .collect();
         Self {
             configs,
-            jars,
+            files,
             keys: resolved.keys.iter().cloned().collect(),
         }
     }
@@ -284,30 +286,30 @@ impl Expected {
 
     /// Whether `relative`, a file the CLI wrote into `instance`, is already as
     /// loading the variant would leave it: present with the content the
-    /// repository has for it, or gone where the variant writes nothing. A
-    /// jar gone is in sync only once the variant no longer has its mod, under
-    /// any file name, and not when the app disabled it: loading removes its
-    /// `.disabled` copy.
+    /// repository has for it, or gone where the variant writes nothing. The
+    /// file of an entry (a jar, a resource pack) gone is in sync only once
+    /// the variant no longer has that entry, under any file name, and not
+    /// when the app disabled it: loading removes its `.disabled` copy.
     fn in_sync(&self, instance: &Path, state: &InstanceState, relative: &str) -> Result<bool> {
         let path = instance.join(relative);
         if !path.exists() {
-            if self.configs.contains_key(relative) || self.jars.contains_key(relative) {
+            if self.configs.contains_key(relative) || self.files.contains_key(relative) {
                 return Ok(false);
             }
-            if relative.starts_with(&format!("{MODS_DIR}/")) {
-                // Without a recorded key, nothing tells which mod it was.
-                let dropped = state
-                    .mods
-                    .get(relative)
-                    .is_some_and(|key| !self.keys.contains(key));
-                return Ok(dropped && !disabled_in_app(instance, state, relative)?);
+            if relative.starts_with(&format!("{CONFIG_DIR}/")) {
+                return Ok(true);
             }
-            return Ok(true);
+            // Without a recorded key, nothing tells which entry it was.
+            let dropped = state
+                .entries
+                .get(relative)
+                .is_some_and(|key| !self.keys.contains(key));
+            return Ok(dropped && !disabled_in_app(instance, state, relative)?);
         }
         if let Some(source) = self.configs.get(relative) {
             return same_content(source, &path);
         }
-        match self.jars.get(relative) {
+        match self.files.get(relative) {
             Some(hashes) => Ok(hash_file(&path)
                 .context(format!("reading {}", path.display()))?
                 .matches(hashes)),
@@ -385,9 +387,9 @@ fn find_instance(root: &Path, instances_file: &Path) -> Result<PathBuf> {
     })
 }
 
-/// Makes sure the repository holds every jar of the variant, with the
-/// manifest's hashes, downloading the missing ones into `mods/`. Returns their
-/// keys. A local mod's jar is never downloaded: git holds it.
+/// Makes sure the repository holds every file of the variant, with the
+/// manifest's hashes, downloading the missing ones. Returns their keys. A
+/// local entry's file is never downloaded: git holds it.
 fn fill_stock(
     root: &Path,
     manifest: &Manifest,
@@ -396,8 +398,8 @@ fn fill_stock(
 ) -> Result<Vec<String>> {
     let inv = inventory(root, manifest)?;
     let local = |key: &String| manifest.get(key).is_some_and(Entry::is_local);
-    // Git holds the jars of mods-local/: neither a download nor
-    // `modpack install` restores them.
+    // Git holds the local files: neither a download nor `modpack install`
+    // restores them.
     let local_gaps: Vec<(&Entry, &str)> = [(&inv.missing, "missing"), (&inv.mismatched, "changed")]
         .into_iter()
         .flat_map(|(keys, how)| keys.iter().map(move |k| (k, how)))
@@ -412,11 +414,11 @@ fn fill_stock(
         let entries: Vec<&Entry> = local_gaps.iter().map(|(e, _)| *e).collect();
         return Err(Error::blocked(
             format!(
-                "local jar(s) of the variant missing from mods-local/ or changed since the manifest:{}",
+                "local file(s) of the variant missing or changed since the manifest:{}",
                 bullets(&lines)
             ),
             format!(
-                "{}; run `modpack manifest` instead for a jar you changed on purpose",
+                "{}; run `modpack manifest` instead for a file you changed on purpose",
                 restore_hint(&entries)
             ),
         ));
@@ -431,7 +433,7 @@ fn fill_stock(
     if !mismatched.is_empty() {
         return Err(Error::blocked(
             format!(
-                "jar(s) of the variant in the repository's mods/ differ from the manifest: {}",
+                "file(s) of the variant in the repository differ from the manifest: {}",
                 mismatched.join(", ")
             ),
             "restore them with `modpack install --force`, or run `modpack manifest` if you changed them on purpose",
@@ -446,7 +448,7 @@ fn fill_stock(
     if !failed.is_empty() {
         return Err(Error::internal(
             format!(
-                "{} jar(s) of the variant could not be downloaded: {}",
+                "{} file(s) of the variant could not be downloaded: {}",
                 failed.len(),
                 failed.join(", ")
             ),
@@ -524,8 +526,8 @@ impl fmt::Display for LoadReport {
         )?;
         let lines = [
             ("downloaded into the repository", &self.downloaded),
-            ("jars copied", &self.copied),
-            ("jars removed", &self.removed),
+            ("files copied", &self.copied),
+            ("files removed", &self.removed),
             ("config written", &self.written),
             ("config removed", &self.config_removed),
             (
@@ -534,7 +536,7 @@ impl fmt::Display for LoadReport {
             ),
             ("not in the manifest, left as is", &self.unknown),
         ];
-        // Everything but the jars left as they are.
+        // Everything but the files left as they are.
         if lines[..lines.len() - 1]
             .iter()
             .all(|(_, items)| items.is_empty())

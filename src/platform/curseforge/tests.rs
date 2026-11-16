@@ -47,6 +47,7 @@ fn file(id: u64, mod_id: u64, date: &str) -> serde_json::Value {
 fn entry(project: u64, file: u64) -> Entry {
     Entry {
         key: "jei".into(),
+        kind: crate::model::manifest::Kind::Mod,
         path: "mods/jei.jar".into(),
         file_size: 1,
         downloads: Vec::new(),
@@ -159,7 +160,7 @@ fn identifies_exact_partial_and_unknown_jars() {
         .match_body(Matcher::Json(json!({ "modIds": [238222, 306612] })))
         .with_body(
             json!({ "data": [
-                { "id": 238222, "slug": "jei" },
+                { "id": 238222, "slug": "jei", "classId": 6 },
                 { "id": 306612, "slug": "fabric-api" }
             ]})
             .to_string(),
@@ -192,7 +193,7 @@ fn resolves_a_slug_to_compatible_files_newest_first() {
             Matcher::UrlEncoded("classId".into(), "6".into()),
             Matcher::UrlEncoded("slug".into(), "jei".into()),
         ]))
-        .with_body(json!({ "data": [{ "id": 238222, "slug": "jei" }] }).to_string())
+        .with_body(json!({ "data": [{ "id": 238222, "slug": "jei", "classId": 6 }] }).to_string())
         .create();
     let files = server
         .mock("GET", "/v1/mods/238222/files")
@@ -246,7 +247,7 @@ fn resolves_an_id_and_a_url_naming_a_file() {
     let mut server = Server::new();
     server
         .mock("GET", "/v1/mods/238222")
-        .with_body(json!({ "data": { "id": 238222, "slug": "jei" } }).to_string())
+        .with_body(json!({ "data": { "id": 238222, "slug": "jei", "classId": 6 } }).to_string())
         .create();
     server
         .mock("GET", "/v1/mods/238222/files")
@@ -256,7 +257,7 @@ fn resolves_an_id_and_a_url_naming_a_file() {
     server
         .mock("GET", "/v1/mods/search")
         .match_query(Matcher::Any)
-        .with_body(json!({ "data": [{ "id": 238222, "slug": "jei" }] }).to_string())
+        .with_body(json!({ "data": [{ "id": 238222, "slug": "jei", "classId": 6 }] }).to_string())
         .create();
     server
         .mock("GET", "/v1/mods/238222/files/9")
@@ -294,6 +295,70 @@ fn an_unknown_mod_resolves_to_nothing() {
     let cf = with_key(&server);
     assert!(cf.resolve("nope", &pack()).unwrap().is_empty());
     assert!(cf.resolve("123", &pack()).unwrap().is_empty());
+}
+
+#[test]
+fn resolves_a_resource_pack_slug_without_a_loader() {
+    let mut server = Server::new();
+    let search = |class: &str| {
+        Matcher::AllOf(vec![
+            Matcher::UrlEncoded("classId".into(), class.into()),
+            Matcher::UrlEncoded("slug".into(), "faithful".into()),
+        ])
+    };
+    let as_mod = server
+        .mock("GET", "/v1/mods/search")
+        .match_query(search("6"))
+        .with_body(json!({ "data": [] }).to_string())
+        .create();
+    let as_pack = server
+        .mock("GET", "/v1/mods/search")
+        .match_query(search("12"))
+        .with_body(json!({ "data": [{ "id": 7, "slug": "faithful", "classId": 12 }] }).to_string())
+        .create();
+    let mut zip = file(1, 7, "2024-01-01T00:00:00Z");
+    zip["fileName"] = json!("faithful.zip");
+    zip["gameVersions"] = json!(["1.21.1"]);
+    let files = server
+        .mock("GET", "/v1/mods/7/files")
+        .match_query(Matcher::AllOf(vec![
+            Matcher::UrlEncoded("gameVersion".into(), "1.21.1".into()),
+            Matcher::UrlEncoded("pageSize".into(), "50".into()),
+        ]))
+        .with_body(json!({ "data": [zip.clone()] }).to_string())
+        .create();
+    server
+        .mock("GET", "/v1/mods/7/files/1")
+        .with_body(json!({ "data": zip }).to_string())
+        .create();
+
+    let cf = with_key(&server);
+    let candidates = cf.resolve("faithful", &pack()).unwrap();
+    as_mod.assert();
+    as_pack.assert();
+    files.assert();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].kind, Kind::Resourcepack);
+    assert_eq!(candidates[0].file_name, "faithful.zip");
+    // A file naming no loader fits a resource pack.
+    let url = "https://www.curseforge.com/minecraft/texture-packs/faithful/files/1";
+    assert_eq!(cf.resolve(url, &pack()).unwrap().len(), 1);
+}
+
+#[test]
+fn a_project_of_another_class_is_refused() {
+    let mut server = Server::new();
+    server
+        .mock("GET", "/v1/mods/99")
+        .with_body(json!({ "data": { "id": 99, "slug": "big-pack", "classId": 4471 } }).to_string())
+        .create();
+    let err = with_key(&server).resolve("99", &pack()).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Usage);
+    assert!(
+        err.to_string()
+            .contains("neither a mod nor a resource pack"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -444,6 +509,10 @@ fn parses_queries() {
     );
     assert_eq!(parse_query("https://modrinth.com/mod/jei"), None);
     assert_eq!(
+        parse_query("https://www.curseforge.com/minecraft/texture-packs/faithful"),
+        Some((Query::Slug("faithful".into()), None))
+    );
+    assert_eq!(
         parse_query("https://notcurseforge.com/minecraft/mc-mods/jei"),
         None
     );
@@ -460,6 +529,22 @@ mod real {
                 .ok()
                 .filter(|k| !k.trim().is_empty())
         })
+    }
+
+    /// Resolves a resource pack: checks the class id CurseForge does not
+    /// document, and that its files are listed without a loader.
+    #[test]
+    #[ignore = "calls the real CurseForge API"]
+    fn resolves_a_resource_pack() {
+        if real_key().is_none() {
+            eprintln!("skipped: set {KEY_VAR} to run it");
+            return;
+        }
+        let cf = CurseForge::with(BASE_URL, real_key);
+        let candidates = cf.resolve("faithful-32x", &pack()).unwrap();
+        let first = candidates.first().expect("Faithful 32x exists for 1.21.1");
+        assert_eq!(first.kind, Kind::Resourcepack);
+        assert!(first.file_name.ends_with(".zip"), "{}", first.file_name);
     }
 
     /// Resolves JEI, fills and downloads its newest file, then identifies the

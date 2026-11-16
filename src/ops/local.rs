@@ -1,10 +1,11 @@
-//! Local mods: jars no platform hosts, tracked by git in `mods-local/`, and
+//! Local entries: mods and resource packs no platform hosts, tracked by git in
+//! their kind's local directory (`mods-local/`, `resourcepacks-local/`), and
 //! their approval for publication.
 //!
-//! `modpack approve <key>` records in the manifest the sha512 of the jar it
-//! approves. The approval holds while the jar keeps that hash: a changed jar
+//! `modpack approve <key>` records in the manifest the sha512 of the file it
+//! approves. The approval holds while the file keeps that hash: a changed file
 //! is rebuilt by `modpack manifest` without it. The publish workflow refuses
-//! to publish while a local mod is not approved.
+//! to publish while a local entry is not approved.
 
 use std::fs;
 use std::io::Write;
@@ -15,24 +16,26 @@ use serde::Serialize;
 
 use crate::error::{Context, Error, Result};
 use crate::model::manifest::{self, Entry, Manifest};
+use crate::store::file_path;
 use crate::store::hash::hash_file;
-use crate::store::jar_path;
 
-/// A local mod of the manifest, as `status` and `pack` report it.
+/// A local entry of the manifest, mod or resource pack, as `status` and
+/// `pack` report it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct LocalMod {
+pub struct LocalEntry {
     pub key: String,
-    /// `mods-local/<name>`.
+    /// `<local dir>/<name>`, such as `mods-local/<name>`.
     pub path: String,
-    /// Whether the approval in the manifest matches the jar in `mods-local/`.
+    /// Whether the approval in the manifest matches the file in the
+    /// repository.
     pub approved: bool,
 }
 
-impl LocalMod {
-    /// The line that says what to do about an unapproved local mod.
+impl LocalEntry {
+    /// The line that says what to do about an unapproved local entry.
     pub fn todo(&self) -> String {
         format!(
-            "`{}` ({}) is not approved for publication: review the jar, then run `modpack approve {}` and commit {}",
+            "`{}` ({}) is not approved for publication: review the file, then run `modpack approve {}` and commit {}",
             self.key,
             self.path,
             self.key,
@@ -41,13 +44,13 @@ impl LocalMod {
     }
 }
 
-/// The local mods of the manifest, sorted by key. A mod is approved when its
-/// approval matches the manifest's hash and the jar in `mods-local/` still has
-/// it. Reads files only.
-pub fn local_mods(root: &Path, manifest: &Manifest) -> Result<Vec<LocalMod>> {
+/// The local entries of the manifest, sorted by key. An entry is approved
+/// when its approval matches the manifest's hash and its file in the
+/// repository still has it. Reads files only.
+pub fn local_entries(root: &Path, manifest: &Manifest) -> Result<Vec<LocalEntry>> {
     let mut mods = Vec::new();
-    for entry in manifest.mods.iter().filter(|e| e.is_local()) {
-        mods.push(LocalMod {
+    for entry in manifest.entries.iter().filter(|e| e.is_local()) {
+        mods.push(LocalEntry {
             key: entry.key.clone(),
             path: entry.path.clone(),
             approved: entry.is_approved() && jar_matches(root, entry)?,
@@ -57,10 +60,10 @@ pub fn local_mods(root: &Path, manifest: &Manifest) -> Result<Vec<LocalMod>> {
     Ok(mods)
 }
 
-/// Whether the jar of a local mod is in `mods-local/` with the manifest's
-/// sha512.
+/// Whether the file of a local entry is in the repository with the
+/// manifest's sha512.
 fn jar_matches(root: &Path, entry: &Entry) -> Result<bool> {
-    let jar = jar_path(root, entry)?;
+    let jar = file_path(root, entry)?;
     if !jar.is_file() {
         return Ok(false);
     }
@@ -68,27 +71,30 @@ fn jar_matches(root: &Path, entry: &Entry) -> Result<bool> {
     Ok(hashes.sha512 == entry.hashes.sha512)
 }
 
-/// Approves the local mod `key`: records the sha512 of its jar in the
+/// Approves the local entry `key`: records the sha512 of its file in the
 /// manifest.
 pub fn approve(root: &Path, key: &str, out: &mut dyn Write) -> Result<()> {
     let path = root.join(manifest::FILE_NAME);
     let mut manifest = Manifest::load(&path)?;
     let entry = manifest.get_mut(key).ok_or_else(|| {
         Error::usage(
-            format!("no mod `{key}` in {}", manifest::FILE_NAME),
-            "use the key of a local mod, as `modpack status` lists them",
+            format!("no entry `{key}` in {}", manifest::FILE_NAME),
+            "use the key of a local entry, as `modpack status` lists them",
         )
     })?;
     if !entry.is_local() {
         return Err(Error::usage(
-            format!("`{key}` is not a local mod: a platform or a URL serves it"),
-            "only the jars of mods-local/ need an approval",
+            format!(
+                "`{key}` is not a local {}: a platform or a URL serves it",
+                entry.noun()
+            ),
+            "only the files of mods-local/ and resourcepacks-local/ need an approval",
         ));
     }
-    let jar = jar_path(root, entry)?;
+    let jar = file_path(root, entry)?;
     if !jar.is_file() {
         return Err(Error::usage(
-            format!("the jar of `{key}`, {}, is missing", entry.path),
+            format!("the file of `{key}`, {}, is missing", entry.path),
             format!("restore it with `git checkout -- {}`", entry.path),
         ));
     }
@@ -102,7 +108,7 @@ pub fn approve(root: &Path, key: &str, out: &mut dyn Write) -> Result<()> {
                 entry.path,
                 manifest::FILE_NAME
             ),
-            "run `modpack manifest`, review the new jar, then approve it",
+            "run `modpack manifest`, review the new file, then approve it",
         ));
     }
     if entry.approved.as_deref() == Some(sha512.as_str()) {
@@ -121,65 +127,65 @@ pub fn approve(root: &Path, key: &str, out: &mut dyn Write) -> Result<()> {
     Ok(())
 }
 
-/// Fails with exit code 3 while a local mod is not approved, writing one line
-/// per such mod to `out`. The publication gate of the CI.
+/// Fails with exit code 3 while a local entry is not approved, writing one
+/// line per such entry to `out`. The publication gate of the CI.
 pub fn check_approved(root: &Path, out: &mut dyn Write) -> Result<()> {
     let manifest = Manifest::load(&root.join(manifest::FILE_NAME))?;
-    let mods = local_mods(root, &manifest)?;
-    let pending: Vec<&LocalMod> = mods.iter().filter(|m| !m.approved).collect();
+    let mods = local_entries(root, &manifest)?;
+    let pending: Vec<&LocalEntry> = mods.iter().filter(|m| !m.approved).collect();
     if pending.is_empty() {
         match mods.len() {
-            0 => writeln!(out, "no local mod")?,
-            n => writeln!(out, "{n} local mod(s), all approved")?,
+            0 => writeln!(out, "no local entry")?,
+            n => writeln!(out, "{n} local entry(ies), all approved")?,
         }
         return Ok(());
     }
     for m in &pending {
-        // Not approved because the jar is absent, as in a checkout where it
+        // Not approved because the file is absent, as in a checkout where it
         // was never committed: approving would not help.
         let missing = manifest
             .get(&m.key)
-            .map(|e| jar_path(root, e))
+            .map(|e| file_path(root, e))
             .transpose()?
             .is_some_and(|jar| !jar.is_file());
         if missing {
             writeln!(
                 out,
-                "`{}` ({}) has no jar in the repository: commit it, or take the mod out with `modpack remove {}`",
+                "`{}` ({}) has no file in the repository: commit it, or take it out with `modpack remove {}`",
                 m.key, m.path, m.key
             )?;
         } else {
             writeln!(out, "{}", m.todo())?;
         }
     }
-    // The lines above name each mod: the error only sums them up.
+    // The lines above name each entry: the error only sums them up.
     Err(Error::blocked(
         format!(
-            "{} local mod(s) not approved for publication",
+            "{} local entry(ies) not approved for publication",
             pending.len()
         ),
-        "each line above says what to do about its mod",
+        "each line above says what to do about its entry",
     ))
 }
 
-/// What to do about local mods whose jar is missing from `mods-local/` or
-/// changed: git holds those jars, nothing downloads them, so
+/// What to do about local entries whose file is missing from the repository
+/// or changed: git holds those files, nothing downloads them, so
 /// `modpack install` cannot help.
 pub fn restore_hint(entries: &[&Entry]) -> String {
     let paths: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
     match entries {
         [entry] => format!(
-            "restore it from git with `git checkout -- {}`, or take the mod out with `modpack remove {}`",
+            "restore it from git with `git checkout -- {}`, or take it out with `modpack remove {}`",
             entry.path, entry.key
         ),
         _ => format!(
-            "restore them from git with `git checkout -- {}`, or take each mod out with `modpack remove <key>`",
+            "restore them from git with `git checkout -- {}`, or take each one out with `modpack remove <key>`",
             paths.join(" ")
         ),
     }
 }
 
-/// Whether git holds the jar of a local mod as committed: tracked, and the
+/// Whether git holds the file of a local entry as committed: tracked, and the
 /// same in the working tree, the index and `HEAD`. Outside a git repository,
 /// or when git cannot run, it is not.
 pub fn jar_committed(root: &Path, entry: &Entry) -> bool {
@@ -197,16 +203,18 @@ pub fn jar_committed(root: &Path, entry: &Entry) -> bool {
         && git(&["status", "--porcelain", "--", &entry.path]).is_some_and(|o| o.is_empty())
 }
 
-/// Refuses, unless `force`, to delete the jar of a local mod that git does not
-/// hold committed. `doing` names the operation, such as "removing".
+/// Refuses, unless `force`, to delete the file of a local entry that git does
+/// not hold committed. `doing` names the operation, such as "removing".
 pub fn refuse_uncommitted(root: &Path, entry: &Entry, force: bool, doing: &str) -> Result<()> {
-    if force || !jar_path(root, entry)?.is_file() || jar_committed(root, entry) {
+    if force || !file_path(root, entry)?.is_file() || jar_committed(root, entry) {
         return Ok(());
     }
     Err(Error::blocked(
         format!(
-            "{doing} the local mod `{}` would delete {}, which is not committed in git",
-            entry.key, entry.path
+            "{doing} the local {} `{}` would delete {}, which is not committed in git",
+            entry.noun(),
+            entry.key,
+            entry.path
         ),
         format!(
             "commit {} first, or rerun with --force to delete it anyway",
@@ -215,10 +223,10 @@ pub fn refuse_uncommitted(root: &Path, entry: &Entry, force: bool, doing: &str) 
     ))
 }
 
-/// Removes the jar of a local mod from the working tree and from git, or from
+/// Removes the file of a local entry from the working tree and from git, or from
 /// the working tree only when git does not track it.
 pub fn remove_jar(root: &Path, entry: &Entry) -> Result<()> {
-    let jar = jar_path(root, entry)?;
+    let jar = file_path(root, entry)?;
     if !jar.is_file() {
         return Ok(());
     }
@@ -264,7 +272,7 @@ mod tests {
     #[test]
     fn approve_records_the_hash_of_the_jar() {
         let root = with_local();
-        assert!(!local_mods(root.path(), &load(root.path())).unwrap()[0].approved);
+        assert!(!local_entries(root.path(), &load(root.path())).unwrap()[0].approved);
 
         let out = approve_out(root.path(), "custom").unwrap();
         assert!(out.starts_with("approved `custom`"), "{out}");
@@ -274,8 +282,8 @@ mod tests {
             Some(custom.hashes.sha512.as_str())
         );
         assert_eq!(
-            local_mods(root.path(), &load(root.path())).unwrap(),
-            [LocalMod {
+            local_entries(root.path(), &load(root.path())).unwrap(),
+            [LocalEntry {
                 key: "custom".into(),
                 path: "mods-local/custom.jar".into(),
                 approved: true
@@ -292,16 +300,16 @@ mod tests {
         fs::write(root.path().join("mods-local/custom.jar"), b"v2").unwrap();
 
         // Before `modpack manifest`: the jar no longer has the approved hash.
-        assert!(!local_mods(root.path(), &load(root.path())).unwrap()[0].approved);
+        assert!(!local_entries(root.path(), &load(root.path())).unwrap()[0].approved);
         let err = approve_out(root.path(), "custom").unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Usage);
         assert!(err.hint().contains("modpack manifest"), "{}", err.hint());
 
         // After: rebuilt without approval, then approved again.
         regenerate(root.path(), &registry()).unwrap();
-        assert!(!local_mods(root.path(), &load(root.path())).unwrap()[0].approved);
+        assert!(!local_entries(root.path(), &load(root.path())).unwrap()[0].approved);
         approve_out(root.path(), "custom").unwrap();
-        assert!(local_mods(root.path(), &load(root.path())).unwrap()[0].approved);
+        assert!(local_entries(root.path(), &load(root.path())).unwrap()[0].approved);
     }
 
     #[test]
@@ -327,7 +335,7 @@ mod tests {
         // Said once: the error does not name the mods again.
         let err = err.to_string();
         assert!(
-            err.starts_with("error: 1 local mod(s) not approved for publication\n"),
+            err.starts_with("error: 1 local entry(ies) not approved for publication\n"),
             "{err}"
         );
         assert!(!err.contains("custom"), "{err}");
@@ -337,7 +345,7 @@ mod tests {
         check_approved(root.path(), &mut out).unwrap();
         assert_eq!(
             String::from_utf8(out).unwrap(),
-            "1 local mod(s), all approved\n"
+            "1 local entry(ies), all approved\n"
         );
 
         // A jar absent from the checkout is named as such, not as unreviewed.
@@ -345,7 +353,7 @@ mod tests {
         let mut out = Vec::new();
         check_approved(root.path(), &mut out).unwrap_err();
         let out = String::from_utf8(out).unwrap();
-        assert!(out.contains("has no jar in the repository"), "{out}");
+        assert!(out.contains("has no file in the repository"), "{out}");
     }
 
     #[test]

@@ -7,7 +7,7 @@
 On a machine set up with chezmoi, the catalogue installs `modpack` from this repository's releases. By hand, on Linux x86_64:
 
 ```sh
-version=0.2.1
+version=0.3.0
 curl -LO "https://github.com/payangar-studio/modpack-cli/releases/download/v$version/modpack-$version-x86_64-unknown-linux-musl.tar.gz"
 curl -LO "https://github.com/payangar-studio/modpack-cli/releases/download/v$version/modpack-$version-x86_64-unknown-linux-musl.tar.gz.sha256"
 sha256sum -c "modpack-$version-x86_64-unknown-linux-musl.tar.gz.sha256"
@@ -25,20 +25,20 @@ The Modrinth App must be installed for `modpack setup` to create the pack's inst
 | `modpack init [dir] --name --mc-version --loader --loader-version --author` | Creates a modpack repository: socle, layout, default variant. Asks for each value not given. |
 | `modpack setup [--no-launch]` | Prepares a clone on this machine: enables the git hooks, downloads the jars, registers the instance in the Modrinth App (one click to confirm the import), loads the default variant. Safe to run again. |
 | `modpack update [--force]` | Brings the repository's socle to this CLI's version. Stops on socle files edited by hand, unless `--force`. |
-| `modpack add <mod> [--version] [--variant]... [--with-deps] [--url] [--force]` | Adds a mod from Modrinth or CurseForge (slug, id or URL) or from a local jar, and updates the manifest, in every variant or only in the variants named: `--variant` repeats, `default` names the default variant, and `--variant default` alone keeps the mod in the default variant only. Asks for the version when several fit. On a mod already in the pack, `--with-deps` adds only its missing dependencies. A mod from a platform whose slug is the key of a local mod replaces it, and its jar leaves git; it stops when that jar is not committed, unless `--force`. |
+| `modpack add <mod> [--version] [--variant]... [--with-deps] [--url] [--force]` | Adds a mod or a resource pack from Modrinth or CurseForge (slug, id or URL) or from a local file (`.jar` for a mod, `.zip` for a resource pack), and updates the manifest, in every variant or only in the variants named: `--variant` repeats, `default` names the default variant, and `--variant default` alone keeps the mod in the default variant only. Asks for the version when several fit. On a mod already in the pack, `--with-deps` adds only its missing dependencies. An entry from a platform whose slug is the key of a local entry of the same type replaces it, and its file leaves git; it stops when that file is not committed, unless `--force`. |
 | `modpack remove <key>` | Removes a mod from the repository and from the variants that list it. The only way a mod leaves the pack. |
-| `modpack manifest [--check]` | Updates `mods.lock.toml` from `mods/` and `mods-local/`: adds the new jars (a jar of `mods-local/` as a local mod, asking no platform), rebuilds the entries whose jar changed, and asks again the platforms an entry has no ids for (CurseForge ids missing because no Core API key was set, say). A jar missing from `mods/` keeps its entry, with a warning (not installed here is not removed). A jar `modpack install` downloaded that the manifest no longer lists is never added back. `--check` fails when it is stale. Both then check `variants.toml` against the manifest (unknown keys, unknown conditions). Run by the `pre-commit` hook. |
-| `modpack approve <key>`, `modpack approve --check` | Approves a local mod for publication: records the sha512 of its jar in the manifest. `--check` fails while a local mod is not approved; the publish workflow runs it. |
-| `modpack install [--force]` | Downloads the missing jars into `mods/`, removes the ones it downloaded that the manifest no longer lists (recorded in `.modpack/local/installed.toml`), then reloads the variant loaded in the instance. Run by the `post-merge` and `post-checkout` hooks. |
+| `modpack manifest [--check]` | Updates `modpack.lock.toml` from `mods/`, `resourcepacks/` and their local directories `mods-local/` and `resourcepacks-local/`: adds the new files, typed by their directory (a file of a local directory as a local entry, asking no platform), rebuilds the entries whose file changed, and asks again the platforms an entry has no ids for (CurseForge ids missing because no Core API key was set, say). A missing file keeps its entry, with a warning (not installed here is not removed). A file `modpack install` downloaded that the manifest no longer lists is never added back. `--check` fails when it is stale. Both then check `variants.toml` against the manifest (unknown keys, unknown conditions). Run by the `pre-commit` hook. |
+| `modpack approve <key>`, `modpack approve --check` | Approves a local mod or resource pack for publication: records the sha512 of its file in the manifest. `--check` fails while a local entry is not approved; the publish workflow runs it. |
+| `modpack install [--force]` | Downloads the missing files into `mods/` and `resourcepacks/`, removes the ones it downloaded that the manifest no longer lists (recorded in `.modpack/local/installed.toml`), then reloads the variant loaded in the instance. Run by the `post-merge` and `post-checkout` hooks. |
 | `modpack variant list` | Lists the variants and marks the loaded one. |
-| `modpack variant load <variant> [--force]` | Loads a variant into the instance: its jars, the base config and its overrides; removes the config files written for the previous variant. Refuses while Minecraft runs; stops on files changed in the instance, and on config files of the instance it did not write that the variant would change, unless `--force`. |
-| `modpack status [--json]` | Loaded variant, drift, jars unknown to the manifest, state of the manifest. The JSON format is in [`docs/status.md`](docs/status.md). |
+| `modpack variant load <variant> [--force]` | Loads a variant into the instance: its jars and resource packs (put in `resourcepacks/`, not enabled: the player turns them on in game), the base config and its overrides; removes the config files written for the previous variant. Refuses while Minecraft runs; stops on files changed in the instance, and on config files of the instance it did not write that the variant would change, unless `--force`. |
+| `modpack status [--json]` | Loaded variant, drift, files unknown to the manifest, state of the manifest. The JSON format is in [`docs/status.md`](docs/status.md). |
 | `modpack test [variant] [--condition] [--json]` | Checks the conditions of a variant, or of all variants. |
 | `modpack pack [variant] [--platform] [--out] [--pack-version] [--json]` | Builds the `.mrpack` and the CurseForge zip of a variant, or of all variants, into `dist/`. |
 | `modpack page push [--platform]` | Pushes `page/` to the platforms that have an API (Modrinth, slug included once the project exists) and names the skill to run for the others (CurseForge). Never in CI. |
 | `modpack auth [secret] [--status] [--remove <secret>]` | Stores the platform secrets in the system keyring, with masked input. |
 
-The variants of a pack and their conditions are written in `variants.toml`, described in [`docs/variants.md`](docs/variants.md). Mods no platform serves are tracked by git in `mods-local/` and approved before publication: see [`docs/local-mods.md`](docs/local-mods.md).
+The variants of a pack and their conditions are written in `variants.toml`, described in [`docs/variants.md`](docs/variants.md). Mods and resource packs no platform serves are tracked by git in `mods-local/` and `resourcepacks-local/` and approved before publication: see [`docs/local-mods.md`](docs/local-mods.md).
 
 Every command runs without a terminal (AI agent, git hook, CI): it then asks nothing, and a missing value is an error that names the argument to pass. Errors say what happened and what to do. Exit codes: `0` success, `1` internal failure, `2` usage error (missing or wrong argument, not in a modpack repository), `3` refused: overridable with `--force`, or a check that did not pass (a failed `modpack test` condition, a platform `modpack pack` cannot build for). `-v` and `-q` set how much is logged on stderr.
 
@@ -63,7 +63,7 @@ Pushing a `v*` tag on `main` of the pack:
 1. checks that the tagged commit is on `origin/main`, and stops otherwise (a guard against a tag on a work branch, not a security boundary);
 2. installs `modpack` from this repository's release;
 3. stops when a local mod is not approved (`modpack approve --check`), naming each one and the command to run; a dry run only warns;
-4. runs `modpack pack` for each published variant, which builds from the manifest and the jars of `mods-local/`: no jar is downloaded;
+4. runs `modpack pack` for each published variant, which builds from the manifest and the files of `mods-local/` and `resourcepacks-local/`: nothing is downloaded;
 5. reads the secrets from the vault (Infisical) by OIDC, as the identity `ci-minecraft`;
 6. creates a version on Modrinth and uploads a file to CurseForge for each pack. A platform that fails does not stop the other.
 

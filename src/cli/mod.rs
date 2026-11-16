@@ -55,24 +55,24 @@ impl Verbosity {
 pub enum Command {
     /// Create a modpack repository: socle, layout, default variant
     Init(init::Args),
-    /// Prepare a clone on this machine: hooks, jars, Modrinth instance, default variant
+    /// Prepare a clone on this machine: hooks, files, Modrinth instance, default variant
     Setup(setup::Args),
     /// Bring the repository's socle to this CLI's version
     Update(update::Args),
-    /// Add a mod from Modrinth, CurseForge or a local jar
+    /// Add a mod or a resource pack from Modrinth, CurseForge or a local file
     Add(add::Args),
-    /// Remove a mod from the repository and from the variants that list it
+    /// Remove a mod or a resource pack from the repository and from the variants that list it
     Remove(remove::Args),
-    /// Regenerate the manifest from mods/
+    /// Regenerate the manifest from mods/, resourcepacks/ and their local directories
     Manifest(manifest::Args),
-    /// Download the missing jars into mods/, then reload the current variant
+    /// Download the missing files into mods/ and resourcepacks/, then reload the current variant
     Install(install::Args),
     /// List or load variants
     Variant {
         #[command(subcommand)]
         command: VariantCommand,
     },
-    /// Loaded variant, drift, jars unknown to the manifest
+    /// Loaded variant, drift, files unknown to the manifest
     Status(status::Args),
     /// Check the conditions of a variant, or of all variants
     Test(test::Args),
@@ -85,7 +85,7 @@ pub enum Command {
     },
     /// Store the platform secrets in the system keyring
     Auth(auth::Args),
-    /// Approve a local mod of mods-local/ for publication
+    /// Approve a local mod or resource pack for publication
     Approve(approve::Args),
 }
 

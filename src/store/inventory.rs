@@ -1,46 +1,46 @@
-//! What `mods/` and `mods-local/` hold, compared to the manifest.
+//! What the repository's kind directories and their local directories hold,
+//! compared to the manifest.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use super::hash::JarHashes;
-use super::{MODS_DIR, jars_in, local_jars};
+use super::stock;
 use crate::error::Result;
 use crate::model::installed::Installed;
 use crate::model::manifest::Manifest;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Inventory {
-    /// Keys of the entries whose jar is there with the manifest's hashes.
+    /// Keys of the entries whose file is there with the manifest's hashes.
     pub present: Vec<String>,
-    /// Keys of the entries whose jar is absent, or replaced by an older jar
+    /// Keys of the entries whose file is absent, or replaced by an older file
     /// the CLI downloaded and nobody changed since.
     pub missing: Vec<String>,
-    /// Keys of the entries whose jar is there with other hashes.
+    /// Keys of the entries whose file is there with other hashes.
     pub mismatched: Vec<String>,
-    /// Jars of `mods/` and `mods-local/` no entry lists, as `mods/<name>` or
-    /// `mods-local/<name>`.
+    /// Files no entry lists, as `<dir>/<name>` (`mods/<name>`,
+    /// `resourcepacks-local/<name>`...).
     pub unknown: Vec<String>,
-    /// Jars the CLI downloaded that no entry lists any more, unchanged since,
-    /// as `mods/<name>`: stale copies, never the user's.
+    /// Files the CLI downloaded that no entry lists any more, unchanged since,
+    /// as `<kind dir>/<name>`: stale copies, never the user's.
     pub stale: Vec<String>,
-    /// Every jar found, as `mods/<name>` or `mods-local/<name>`, with its
-    /// hashes.
+    /// Every file found, as `<dir>/<name>`, with its hashes.
     pub jars: BTreeMap<String, JarHashes>,
 }
 
-/// Hashes every jar of `<root>/mods/` and `<root>/mods-local/` and sorts the
-/// manifest's entries by what was found, telling the jars the CLI downloaded
-/// (see [`Installed`]) from the user's. A missing directory is an empty
-/// stock. The CLI never downloads into `mods-local/`: its jars are the user's.
+/// Hashes every file of the repository's kind directories and local
+/// directories (see [`stock`]) and sorts the manifest's entries by what was
+/// found, telling the files the CLI downloaded (see [`Installed`]) from the
+/// user's. A missing directory is an empty stock. The CLI never downloads
+/// into a local directory: its files are the user's.
 pub fn inventory(root: &Path, manifest: &Manifest) -> Result<Inventory> {
-    let mut jars = jars_in(&root.join(MODS_DIR))?;
-    jars.extend(local_jars(root)?);
+    let jars = stock(root)?;
     let installed = Installed::load(root)?;
     let placed = |path: &str, found: &JarHashes| installed.placed(path, &found.sha1);
 
     let mut inv = Inventory::default();
-    for entry in &manifest.mods {
+    for entry in &manifest.entries {
         let list = match jars.get(&entry.path) {
             None => &mut inv.missing,
             Some(found) if found.matches(&entry.hashes) => &mut inv.present,
@@ -49,7 +49,7 @@ pub fn inventory(root: &Path, manifest: &Manifest) -> Result<Inventory> {
         };
         list.push(entry.key.clone());
     }
-    let listed: BTreeSet<&str> = manifest.mods.iter().map(|e| e.path.as_str()).collect();
+    let listed: BTreeSet<&str> = manifest.entries.iter().map(|e| e.path.as_str()).collect();
     for (path, found) in &jars {
         if listed.contains(path.as_str()) {
             continue;
@@ -110,6 +110,28 @@ mod tests {
         assert_eq!(inv.present, ["custom"]);
         assert_eq!(inv.unknown, ["mods-local/dropped.jar"]);
         assert!(inv.stale.is_empty());
+    }
+
+    #[test]
+    fn resource_packs_are_sorted_like_mods() {
+        let root = tempfile::tempdir().unwrap();
+        for dir in ["resourcepacks", "resourcepacks-local"] {
+            fs::create_dir_all(root.path().join(dir)).unwrap();
+        }
+        fs::write(root.path().join("resourcepacks/faithful.zip"), b"faithful").unwrap();
+        fs::write(root.path().join("resourcepacks/dropped.zip"), b"x").unwrap();
+        fs::write(root.path().join("resourcepacks-local/house.zip"), b"house").unwrap();
+        let mut faithful = entry("faithful", b"faithful");
+        faithful.kind = crate::model::manifest::Kind::Resourcepack;
+        faithful.path = "resourcepacks/faithful.zip".into();
+        let mut house = entry("house", b"house");
+        house.kind = crate::model::manifest::Kind::Resourcepack;
+        house.path = "resourcepacks-local/house.zip".into();
+        house.source = Some(crate::model::manifest::Source::Local);
+
+        let inv = inventory(root.path(), &manifest(vec![faithful, house])).unwrap();
+        assert_eq!(inv.present, ["faithful", "house"]);
+        assert_eq!(inv.unknown, ["resourcepacks/dropped.zip"]);
     }
 
     #[test]

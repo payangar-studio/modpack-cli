@@ -114,8 +114,9 @@ jobs:
           echo "$dir/bin" >> "$GITHUB_PATH"
           echo "Installed modpack $tag."
 
-      # A local mod (a jar of mods-local/) is published only once approved:
-      # its approval, recorded in the manifest, matches the jar's hash. A dry
+      # A local entry (a file of mods-local/ or resourcepacks-local/) is
+      # published only once approved: its approval, recorded in the manifest,
+      # matches the file's hash. A dry
       # run publishes nothing, so it only warns.
       - name: Check that the local mods are approved
         env:
@@ -228,8 +229,9 @@ jobs:
           fi
           echo "PUBLISH_PLATFORMS=${publish[*]}" >> "$GITHUB_ENV"
 
-      # `pack` builds from the manifest, config, overrides and mods-local/:
-      # no jar is downloaded, so the CI needs no CurseForge API key.
+      # `pack` builds from the manifest, config, overrides, mods-local/ and
+      # resourcepacks-local/: nothing is downloaded, so the CI needs no
+      # CurseForge API key.
       - name: Build the packs
         id: pack
         env:

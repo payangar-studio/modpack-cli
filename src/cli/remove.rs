@@ -1,14 +1,15 @@
-//! `modpack remove`: removes a mod from the repository and its variants.
+//! `modpack remove`: removes a mod or a resource pack from the repository and
+//! its variants.
 
 use crate::context::Context;
 use crate::error::Result;
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// Manifest key of the mod
+    /// Manifest key of the entry
     pub key: String,
-    /// Remove a local mod even when its jar is not committed in git,
-    /// deleting that jar
+    /// Remove a local entry even when its file is not committed in git,
+    /// deleting that file
     #[arg(long)]
     pub force: bool,
 }

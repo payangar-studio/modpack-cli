@@ -53,7 +53,7 @@ fn a_failed_condition_exits_with_the_blocked_code() {
     for file in [
         ".modpack/socle.toml",
         ".modpack/socle.lock",
-        "mods.lock.toml",
+        "modpack.lock.toml",
     ] {
         std::fs::copy(src.join(file), dir.path().join(file)).unwrap();
     }

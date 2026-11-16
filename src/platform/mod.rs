@@ -13,7 +13,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
-use crate::model::manifest::{Entry, Pack};
+use crate::model::manifest::{Entry, Kind, Pack};
 
 pub mod curseforge;
 #[cfg(test)]
@@ -95,13 +95,16 @@ pub struct Match {
     pub exact: bool,
 }
 
-/// A version of a mod the user asked for, compatible with the pack.
+/// A version of a mod or resource pack the user asked for, compatible with
+/// the pack.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Candidate {
     /// What to show when asking which version to take.
     pub label: String,
     pub slug: Option<String>,
-    /// File name of the jar, used as its name in `mods/`.
+    /// What the project is, which sets where its file goes.
+    pub kind: Kind,
+    /// File name of the file, used as its name in its kind's directory.
     pub file_name: String,
     /// The platform's table for the manifest entry.
     pub section: toml::Table,
@@ -147,8 +150,8 @@ pub struct PackBuild<'a> {
     /// Version of the pack being built.
     pub version: &'a str,
     pub pack: &'a Pack,
-    /// The mods of the variant.
-    pub mods: Vec<&'a Entry>,
+    /// The entries of the variant, mods and resource packs.
+    pub entries: Vec<&'a Entry>,
     /// Files to put under `overrides/`, in order: a later one replaces an
     /// earlier one at the same path.
     pub overrides: Vec<Override>,
@@ -181,8 +184,10 @@ pub trait Platform: Send + Sync {
         Err(unsupported(self.name(), Operation::Identify))
     }
 
-    /// Versions of the mod `query` (slug, id or URL) compatible with `pack`,
-    /// best first. Empty when the platform does not know the mod.
+    /// Versions of the mod or resource pack `query` (slug, id or URL)
+    /// compatible with `pack`, best first. Empty when the platform does not
+    /// know the project. A project of another type (a shader, a modpack) is a
+    /// usage error.
     fn resolve(&self, query: &str, pack: &Pack) -> Result<Vec<Candidate>> {
         let _ = (query, pack);
         Err(unsupported(self.name(), Operation::Resolve))
@@ -214,8 +219,8 @@ pub trait Platform: Send + Sync {
         Err(unsupported(self.name(), Operation::PackEligibility))
     }
 
-    /// What to check by hand about a jar embedded in this platform's pack
-    /// (a local mod, under `overrides/mods/`), if anything.
+    /// What to check by hand about a file embedded in this platform's pack
+    /// (a local entry, under `overrides/<kind dir>/`), if anything.
     fn embedded_jar_note(&self) -> Option<String> {
         None
     }

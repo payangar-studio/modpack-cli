@@ -57,7 +57,7 @@ struct FileRef {
 pub fn build(build: &PackBuild<'_>) -> Result<PathBuf> {
     loader(&build.pack.loader)?;
     let files = build
-        .mods
+        .entries
         .iter()
         .map(|entry| {
             let (project_id, file_id) = ids(entry)?;
@@ -124,7 +124,7 @@ mod tests {
 
     fn fixture() -> ModsLock {
         ModsLock::load(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/repo/mods.lock.toml"),
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/repo/modpack.lock.toml"),
         )
         .unwrap()
     }
@@ -151,7 +151,7 @@ mod tests {
             name: "Test Pack",
             version: "1.2.3",
             pack: &lock.pack,
-            mods: vec![lock.get("ferritecore").unwrap(), lock.get("jei").unwrap()],
+            entries: vec![lock.get("ferritecore").unwrap(), lock.get("jei").unwrap()],
             overrides: vec![
                 Override {
                     source: base,
@@ -200,7 +200,7 @@ mod tests {
             name: "Test Pack",
             version: "1.2.3",
             pack: &lock.pack,
-            mods: vec![lock.get("sodium").unwrap()],
+            entries: vec![lock.get("sodium").unwrap()],
             overrides: Vec::new(),
             out_dir: dir.path(),
             file_stem: "x",

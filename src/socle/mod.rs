@@ -392,7 +392,7 @@ mod tests {
         assert_eq!(config.init, values());
         let manifest = Manifest::load(&root.join(manifest::FILE_NAME)).unwrap();
         assert_eq!(manifest.pack.loader_version, "21.1.77");
-        assert!(manifest.mods.is_empty());
+        assert!(manifest.entries.is_empty());
         assert!(root.join("variants.toml").is_file());
         assert!(root.join("overrides").is_dir());
     }

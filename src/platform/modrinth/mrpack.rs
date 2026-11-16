@@ -61,7 +61,7 @@ pub fn build(build: &PackBuild<'_>) -> Result<PathBuf> {
 
 fn index(build: &PackBuild<'_>) -> Result<Value> {
     let blocked: Vec<&str> = build
-        .mods
+        .entries
         .iter()
         .filter(|e| allowed_downloads(e).is_empty())
         .map(|e| e.key.as_str())
@@ -91,7 +91,7 @@ fn index(build: &PackBuild<'_>) -> Result<Value> {
         }
     };
     let files: Vec<Value> = build
-        .mods
+        .entries
         .iter()
         .map(|e| {
             json!({
@@ -157,7 +157,7 @@ mod tests {
 
     fn fixture() -> Manifest {
         Manifest::load(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/repo/mods.lock.toml"),
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/repo/modpack.lock.toml"),
         )
         .unwrap()
     }
@@ -192,7 +192,7 @@ mod tests {
         fs::write(&base, "base").unwrap();
         fs::write(&variant, "variant").unwrap();
         let mods: Vec<&Entry> = manifest
-            .mods
+            .entries
             .iter()
             .filter(|e| e.key != "hardcore-tweaks")
             .collect();
@@ -200,7 +200,7 @@ mod tests {
             name: "Test Pack",
             version: "1.2.3",
             pack: &manifest.pack,
-            mods: mods.clone(),
+            entries: mods.clone(),
             overrides: vec![
                 Override {
                     source: base,
@@ -268,7 +268,7 @@ mod tests {
             name: "Test",
             version: "1.0.0",
             pack: &manifest.pack,
-            mods: manifest.mods.iter().collect(),
+            entries: manifest.entries.iter().collect(),
             overrides: Vec::new(),
             out_dir: dir.path(),
             file_stem: "test",
@@ -288,7 +288,7 @@ mod tests {
             name: "T",
             version: "1",
             pack: &manifest.pack,
-            mods: vec![sodium],
+            entries: vec![sodium],
             overrides: Vec::new(),
             out_dir: dir.path(),
             file_stem: "t",

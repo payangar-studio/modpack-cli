@@ -1,5 +1,5 @@
-//! `modpack install`: downloads the missing jars into mods/, then reloads the
-//! variant loaded in the pack's instance.
+//! `modpack install`: downloads the missing files into mods/ and
+//! resourcepacks/, then reloads the variant loaded in the pack's instance.
 
 use std::fs;
 use std::io::Write;
@@ -19,7 +19,7 @@ use crate::variant::{self, LoadContext};
 
 #[derive(Debug, clap::Args)]
 pub struct Args {
-    /// Replace the jars whose hash differs from the manifest
+    /// Replace the files whose hash differs from the manifest
     #[arg(long)]
     pub force: bool,
 }
@@ -63,8 +63,8 @@ pub(crate) fn install(
     let manifest = Manifest::load(&manifest_path)?;
     let mut inv = inventory(root, &manifest)?;
     remove_stale(root, &inv)?;
-    // A changed jar of mods-local/ is never replaced, not even with --force:
-    // git holds it, nothing downloads it.
+    // A changed local file is never replaced, not even with --force: git
+    // holds it, nothing downloads it.
     let (local_changed, mismatched): (Vec<String>, Vec<String>) = inv
         .mismatched
         .drain(..)
@@ -86,7 +86,7 @@ pub(crate) fn install(
 
     writeln!(
         out,
-        "jars: {} present, {downloaded} downloaded, {} failed",
+        "files: {} present, {downloaded} downloaded, {} failed",
         inv.present.len(),
         failures.len()
     )?;
@@ -117,7 +117,7 @@ pub(crate) fn install(
     if !local_changed.is_empty() {
         writeln!(
             out,
-            "local jar changed since the manifest, never replaced: {}",
+            "local file changed since the manifest, never replaced: {}",
             local_changed.join(", ")
         )?;
     }
@@ -144,14 +144,14 @@ pub(crate) fn install(
             ),
         };
         return Err(Error::internal(
-            format!("{} jar(s) could not be downloaded", failures.len()),
+            format!("{} file(s) could not be downloaded", failures.len()),
             hint,
         ));
     }
     if !force && !inv.mismatched.is_empty() {
         return Err(Error::blocked(
             format!(
-                "{} jar(s) in mods/ differ from the manifest",
+                "{} file(s) in the repository differ from the manifest",
                 inv.mismatched.len()
             ),
             "rerun with --force to replace them with the manifest's version, or run `modpack manifest` if you changed them on purpose",
@@ -161,7 +161,7 @@ pub(crate) fn install(
         let changed = entries(&manifest, &local_changed);
         return Err(Error::blocked(
             format!(
-                "{} local jar(s) in mods-local/ differ from the manifest",
+                "{} local file(s) in the repository differ from the manifest",
                 changed.len()
             ),
             format!(
@@ -179,9 +179,9 @@ pub(crate) fn install(
     reload(&ctx, out)
 }
 
-/// Removes from `mods/` the jars the CLI downloaded that the manifest no
-/// longer lists, and forgets the recorded jars that are gone or were changed
-/// since: those are the user's now.
+/// Removes the files the CLI downloaded that the manifest no longer lists,
+/// and forgets the recorded files that are gone or were changed since: those
+/// are the user's now.
 fn remove_stale(root: &Path, inv: &Inventory) -> Result<()> {
     for rel in &inv.stale {
         let path = root.join(rel);
@@ -202,7 +202,7 @@ fn entries<'a>(manifest: &'a Manifest, keys: &[String]) -> Vec<&'a Entry> {
     keys.iter().filter_map(|k| manifest.get(k)).collect()
 }
 
-/// One failed jar: every source tried, with what went wrong and what to do.
+/// One failed file: every source tried, with what went wrong and what to do.
 fn write_failure(out: &mut dyn Write, failure: &Failure) -> Result<()> {
     writeln!(out, "failed: {}", failure.key)?;
     for attempt in &failure.attempts {
@@ -332,7 +332,7 @@ mod tests {
         let (result, out) = repo.install(false);
         result.unwrap();
         assert!(
-            out.contains("jars: 0 present, 2 downloaded, 0 failed"),
+            out.contains("files: 0 present, 2 downloaded, 0 failed"),
             "{out}"
         );
         assert_eq!(fs::read(repo.path("mods/jei-1.0.0.jar")).unwrap(), b"jei");
@@ -347,7 +347,7 @@ mod tests {
         let (result, out) = repo.install_with(&NoFetch, false);
         result.unwrap();
         assert!(
-            out.contains("jars: 2 present, 0 downloaded, 0 failed"),
+            out.contains("files: 2 present, 0 downloaded, 0 failed"),
             "{out}"
         );
         assert!(out.contains("left as is: mods/tried.jar"), "{out}");
@@ -369,7 +369,7 @@ mod tests {
 
         let (result, out) = repo.install(true);
         result.unwrap();
-        assert!(out.contains("jars: 1 present, 1 downloaded"), "{out}");
+        assert!(out.contains("files: 1 present, 1 downloaded"), "{out}");
         assert!(out.contains("replaced, their hash differed from the manifest: iris"));
         assert_eq!(fs::read(repo.path("mods/iris-1.0.0.jar")).unwrap(), b"iris");
     }
@@ -395,7 +395,7 @@ mod tests {
         let (result, out) = repo.install_with(&fetch, false);
         result.unwrap();
         assert!(
-            out.contains("jars: 0 present, 1 downloaded, 0 failed"),
+            out.contains("files: 0 present, 1 downloaded, 0 failed"),
             "{out}"
         );
         assert!(
@@ -438,9 +438,12 @@ mod tests {
         let fetch = MapFetch::default().with("https://cdn.invalid/jei.jar", b"jei");
         let (result, out) = repo.install_with(&fetch, false);
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("1 jar(s) could not be downloaded"));
         assert!(
-            out.contains("jars: 0 present, 1 downloaded, 1 failed"),
+            err.to_string()
+                .contains("1 file(s) could not be downloaded")
+        );
+        assert!(
+            out.contains("files: 0 present, 1 downloaded, 1 failed"),
             "{out}"
         );
         assert!(
@@ -476,7 +479,7 @@ mod tests {
         let (result, out) = repo.install_with(&NoFetch, false);
         result.unwrap();
         assert!(out.contains("variant `server` loaded into"), "{out}");
-        assert!(out.contains("jars copied: mods/jei-1.0.0.jar\n"), "{out}");
+        assert!(out.contains("files copied: mods/jei-1.0.0.jar\n"), "{out}");
         assert!(instance.join("mods/jei-1.0.0.jar").is_file());
         assert!(!instance.join("mods/iris-1.0.0.jar").exists());
     }
@@ -532,7 +535,7 @@ mod tests {
         let (result, out) = repo.install(false);
         result.unwrap();
         assert!(
-            out.contains("jars: 1 present, 2 downloaded, 0 failed"),
+            out.contains("files: 1 present, 2 downloaded, 0 failed"),
             "{out}"
         );
         assert_eq!(
@@ -565,7 +568,7 @@ mod tests {
         let err = result.unwrap_err();
         assert_eq!(err.kind(), ErrorKind::Blocked);
         assert!(
-            out.contains("local jar changed since the manifest, never replaced: custom"),
+            out.contains("local file changed since the manifest, never replaced: custom"),
             "{out}"
         );
         assert!(

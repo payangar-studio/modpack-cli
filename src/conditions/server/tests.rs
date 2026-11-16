@@ -274,7 +274,7 @@ read cmd
     }
 
     #[test]
-    fn client_only_mods_are_left_out_of_the_server() {
+    fn client_only_mods_and_resource_packs_are_left_out_of_the_server() {
         let setup = Setup::new();
         let r = setup.repo.path();
         fs::write(r.join("mods/gamma-1.0.0.jar"), b"gamma").unwrap();
@@ -282,6 +282,12 @@ read cmd
         let mut gamma = entry("gamma", b"gamma");
         gamma.env.server = Support::Unsupported;
         m.upsert(gamma);
+        // Said to be needed on the server, absent from the repository: still
+        // never asked for, a server loads no resource pack.
+        let mut faithful = entry("faithful", b"faithful");
+        faithful.kind = crate::model::manifest::Kind::Resourcepack;
+        faithful.path = "resourcepacks/faithful.zip".into();
+        m.upsert(faithful);
         let server = checking_server("-jar fabric-server-launch.jar nogui").replace(
             DONE,
             &format!(
@@ -289,7 +295,12 @@ read cmd
             ),
         );
         let java = setup.java(21, &server);
-        let status = setup.check(java, &fabric_fetch(), &m, &["alpha", "beta", "gamma"]);
+        let status = setup.check(
+            java,
+            &fabric_fetch(),
+            &m,
+            &["alpha", "beta", "gamma", "faithful"],
+        );
         assert_eq!(status, Status::Passed, "calls: {}", setup.calls());
     }
 

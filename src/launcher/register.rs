@@ -261,7 +261,7 @@ mod tests {
             name: "My: Pack",
             version: "1.0.0",
             pack: &pack,
-            mods: Vec::new(),
+            entries: Vec::new(),
             overrides: Vec::new(),
             out_dir: out.path(),
             file_stem: "ignored",

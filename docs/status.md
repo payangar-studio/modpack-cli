@@ -1,12 +1,12 @@
 # `modpack status --json`
 
-`modpack status` reports the state of a pack on this machine: the socle version, the pack's Modrinth instance, the variant loaded there, drift, jars of the instance the manifest does not know, how `mods/` and `mods-local/` of the repository compare to the manifest, and the local mods with their approval. It reads files only: it writes nothing and makes no network call.
+`modpack status` reports the state of a pack on this machine: the socle version, the pack's Modrinth instance, the variant loaded there, drift, files of the instance the manifest does not know, how `mods/`, `resourcepacks/` and their local directories compare to the manifest, and the local entries with their approval. It reads files only: it writes nothing and makes no network call.
 
 With `--json`, the report is one JSON object on stdout. This format is the contract read by the socle's return skill (`modpack-return`). Logs go to stderr and never mix with it.
 
 ## Exit code
 
-- `0`: the report was produced, whatever it contains. Findings (drift, unknown jars, stale manifest) do not change the exit code.
+- `0`: the report was produced, whatever it contains. Findings (drift, unknown files, stale manifest) do not change the exit code.
 - `2`: not inside a modpack repository, an invalid repository file, or a repository whose socle is newer than the CLI (it does not know that format; nothing is printed on stdout).
 - `1`: an unexpected failure, such as an unreadable file.
 
@@ -20,21 +20,21 @@ With `--json`, the report is one JSON object on stdout. This format is the contr
 | `instance` | The pack's instance on this machine, or `null` when there is none (no entry in the machine's `instances.toml`, or its directory is gone): `modpack setup` creates it. |
 | `instance.path` | Absolute path of the instance directory. Its `logs/` and `crash-reports/` are there. |
 | `instance.variant` | Variant loaded last, or `null` before the first `modpack variant load`. |
-| `instance.drift` | Files the CLI wrote into the instance that changed or were deleted since, relative to the instance, with `/` separators. A file already as loading the variant again would leave it is not drift: same content as the repository's, or deleted where the variant writes nothing. A deleted jar counts only once the variant no longer has its mod, under any file name, and never when the app disabled it. When the repository has no such variant, every change counts. |
-| `instance.disabled` | Jars of `drift` that the Modrinth App disabled: renamed `<jar>.disabled`, content unchanged. `modpack variant load <variant> --force` enables them again. |
-| `instance.unknown_jars` | Jars of the instance's `mods/` whose sha1 and sha512 match no manifest entry, whatever their file name, with their hashes so they can be looked up on the platforms. The jars of `outdated_jars` are not listed. |
-| `instance.outdated_jars` | Jars the CLI wrote into the instance's `mods/` at an earlier load, unchanged since, that no manifest entry has any more: the mod was removed or updated, or a local mod was rebuilt. `modpack variant load` replaces them. `local_mod` is the key of the local mod whose jar has the same file name, the jar then being its previous build, or `null`. |
-| `missing_jars` | Manifest entries whose jar is absent from `mods/` of the repository, or replaced by an older jar `modpack install` downloaded and nobody changed since: `modpack install` downloads them. A local mod listed here lost its jar from `mods-local/`: git restores it. |
-| `manifest.stale` | `true` when `new_jars` or `changed` is not empty: `modpack manifest` regenerates the manifest. |
-| `manifest.new_jars` | Jars of `mods/` or `mods-local/` of the repository that no entry lists, except the ones `modpack install` downloaded and nobody changed since: those are removed by the next `modpack install`, never added back. |
-| `manifest.changed` | Entries whose jar is in `mods/` or `mods-local/` of the repository with other hashes than the manifest's. |
-| `local_mods` | The local mods: jars tracked by git in `mods-local/` (see [local mods](local-mods.md)). `approved` is `true` when the approval recorded in the manifest matches the jar; the publish workflow refuses to publish while one is `false`, and `modpack approve <key>` approves it. |
+| `instance.drift` | Files the CLI wrote into the instance that changed or were deleted since, relative to the instance, with `/` separators. A file already as loading the variant again would leave it is not drift: same content as the repository's, or deleted where the variant writes nothing. A deleted jar or resource pack counts only once the variant no longer has its entry, under any file name, and never when the app disabled it. When the repository has no such variant, every change counts. |
+| `instance.disabled` | Files of `drift` that the Modrinth App disabled: renamed `<file>.disabled`, content unchanged. `modpack variant load <variant> --force` enables them again. |
+| `instance.unknown_files` | Jars of the instance's `mods/` and zips of its `resourcepacks/` whose sha1 and sha512 match no manifest entry, whatever their file name, with their hashes so they can be looked up on the platforms. The files of `outdated_files` are not listed. |
+| `instance.outdated_files` | Files the CLI wrote into the instance's `mods/` or `resourcepacks/` at an earlier load, unchanged since, that no manifest entry has any more: the entry was removed or updated, or a local entry was rebuilt. `modpack variant load` replaces them. `local_entry` is the key of the local entry whose file has the same name, the file then being its previous build, or `null`. |
+| `missing_files` | Manifest entries whose file is absent from the repository, or replaced by an older file `modpack install` downloaded and nobody changed since: `modpack install` downloads them. A local entry listed here lost its file from `mods-local/` or `resourcepacks-local/`: git restores it. |
+| `manifest.stale` | `true` when `new_files` or `changed` is not empty: `modpack manifest` regenerates the manifest. |
+| `manifest.new_files` | Files of `mods/`, `resourcepacks/` or their local directories that no entry lists, except the ones `modpack install` downloaded and nobody changed since: those are removed by the next `modpack install`, never added back. |
+| `manifest.changed` | Entries whose file is in the repository with other hashes than the manifest's. |
+| `local_entries` | The local mods and resource packs: files tracked by git in `mods-local/` and `resourcepacks-local/` (see [local mods](local-mods.md)). `approved` is `true` when the approval recorded in the manifest matches the file; the publish workflow refuses to publish while one is `false`, and `modpack approve <key>` approves it. |
 
-Only hashes are compared: the report never asks a platform about a jar.
+Only hashes are compared: the report never asks a platform about a file.
 
-A jar listed in `missing_jars` does not make the manifest stale: a missing jar means "not installed on this machine", never "removed from the pack", and `modpack manifest` keeps its entry. It is the usual case in a fresh clone, since git does not hold the jars. A mod leaves the pack only through `modpack remove <key>`, which also takes its key out of the variants.
+A file listed in `missing_files` does not make the manifest stale: a missing file means "not installed on this machine", never "removed from the pack", and `modpack manifest` keeps its entry. It is the usual case in a fresh clone, since git holds only the local files. An entry leaves the pack only through `modpack remove <key>`, which also takes its key out of the variants.
 
-Lists are sorted. Paths of jars are relative (`mods/<name>`, `mods-local/<name>`), to the instance for `unknown_jars`, to the repository otherwise.
+Lists are sorted. Paths of files are relative (`mods/<name>`, `mods-local/<name>`, `resourcepacks/<name>`, `resourcepacks-local/<name>`), to the instance for `unknown_files`, to the repository otherwise.
 
 ## Schema
 
@@ -46,7 +46,7 @@ JSON Schema (draft 2020-12). It describes this version exactly. A later version 
   "title": "modpack status",
   "type": "object",
   "additionalProperties": false,
-  "required": ["socle", "instance", "missing_jars", "manifest", "local_mods"],
+  "required": ["socle", "instance", "missing_files", "manifest", "local_entries"],
   "properties": {
     "socle": {
       "type": "object",
@@ -64,13 +64,13 @@ JSON Schema (draft 2020-12). It describes this version exactly. A later version 
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["path", "variant", "drift", "disabled", "unknown_jars", "outdated_jars"],
+          "required": ["path", "variant", "drift", "disabled", "unknown_files", "outdated_files"],
           "properties": {
             "path": { "type": "string" },
             "variant": { "type": ["string", "null"] },
             "drift": { "type": "array", "items": { "type": "string" } },
             "disabled": { "type": "array", "items": { "type": "string" } },
-            "unknown_jars": {
+            "unknown_files": {
               "type": "array",
               "items": {
                 "type": "object",
@@ -83,15 +83,15 @@ JSON Schema (draft 2020-12). It describes this version exactly. A later version 
                 }
               }
             },
-            "outdated_jars": {
+            "outdated_files": {
               "type": "array",
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["path", "local_mod"],
+                "required": ["path", "local_entry"],
                 "properties": {
                   "path": { "type": "string" },
-                  "local_mod": { "type": ["string", "null"] }
+                  "local_entry": { "type": ["string", "null"] }
                 }
               }
             }
@@ -99,18 +99,18 @@ JSON Schema (draft 2020-12). It describes this version exactly. A later version 
         }
       ]
     },
-    "missing_jars": { "type": "array", "items": { "$ref": "#/$defs/jar" } },
+    "missing_files": { "type": "array", "items": { "$ref": "#/$defs/entryFile" } },
     "manifest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["stale", "new_jars", "changed"],
+      "required": ["stale", "new_files", "changed"],
       "properties": {
         "stale": { "type": "boolean" },
-        "new_jars": { "type": "array", "items": { "type": "string" } },
-        "changed": { "type": "array", "items": { "$ref": "#/$defs/jar" } }
+        "new_files": { "type": "array", "items": { "type": "string" } },
+        "changed": { "type": "array", "items": { "$ref": "#/$defs/entryFile" } }
       }
     },
-    "local_mods": {
+    "local_entries": {
       "type": "array",
       "items": {
         "type": "object",
@@ -125,7 +125,7 @@ JSON Schema (draft 2020-12). It describes this version exactly. A later version 
     }
   },
   "$defs": {
-    "jar": {
+    "entryFile": {
       "type": "object",
       "additionalProperties": false,
       "required": ["key", "path"],
@@ -150,17 +150,17 @@ An instance where a config file was changed in game, a mod was tried from the ap
     "variant": "default",
     "drift": ["config/jei-client.toml"],
     "disabled": [],
-    "unknown_jars": [
+    "unknown_files": [
       {
         "path": "mods/appleskin-neoforge-mc1.21-3.0.5.jar",
         "sha1": "a9993e364706816aba3e25717850c26c9cd0d89d",
         "sha512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
       }
     ],
-    "outdated_jars": [{ "path": "mods/custom-tweaks-0.3.jar", "local_mod": "custom-tweaks" }]
+    "outdated_files": [{ "path": "mods/custom-tweaks-0.3.jar", "local_entry": "custom-tweaks" }]
   },
-  "missing_jars": [{ "key": "iris", "path": "mods/iris-neoforge-1.8.1.jar" }],
-  "manifest": { "stale": false, "new_jars": [], "changed": [] },
-  "local_mods": [{ "key": "custom-tweaks", "path": "mods-local/custom-tweaks-0.3.jar", "approved": false }]
+  "missing_files": [{ "key": "iris", "path": "mods/iris-neoforge-1.8.1.jar" }],
+  "manifest": { "stale": false, "new_files": [], "changed": [] },
+  "local_entries": [{ "key": "custom-tweaks", "path": "mods-local/custom-tweaks-0.3.jar", "approved": false }]
 }
 ```

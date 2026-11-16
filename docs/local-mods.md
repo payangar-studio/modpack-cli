@@ -4,7 +4,7 @@ A local mod is a jar no platform serves: an abandoned mod, a build of a mod unde
 
 ## Adding one
 
-Drop the jar into `mods-local/`. `modpack manifest`, which the `pre-commit` hook runs, adds it to `mods.lock.toml`, and the hook adds the jars of `mods-local/` to the commit. `modpack add mods-local/<jar>` does the same at once.
+Drop the jar into `mods-local/`. `modpack manifest`, which the `pre-commit` hook runs, adds it to `modpack.lock.toml`, and the hook adds the jars of `mods-local/` to the commit. `modpack add mods-local/<jar>` does the same at once.
 
 The instance's `mods/` holds every jar by its file name, so a jar of `mods-local/` cannot share its file name with a jar of `mods/` or of another entry: `modpack manifest` and `modpack add` refuse it, naming both files. Rename one of them.
 
@@ -20,7 +20,7 @@ When the mod reaches Modrinth or CurseForge, `modpack add <slug>` replaces the l
 
 ## Approval
 
-`modpack approve <key>` records in the manifest, as `approved`, the sha512 of the jar it approves. Approving is the user's review of the jar: its license allows redistribution, and its content is what it claims. Commit `mods.lock.toml` afterwards.
+`modpack approve <key>` records in the manifest, as `approved`, the sha512 of the jar it approves. Approving is the user's review of the jar: its license allows redistribution, and its content is what it claims. Commit `modpack.lock.toml` afterwards.
 
 The approval holds while the jar keeps that hash. A new jar, even under the same name, is not approved until `modpack approve` runs again.
 
@@ -31,6 +31,10 @@ The approval holds while the jar keeps that hash. A new jar, even under the same
 `modpack pack` embeds each local mod of a variant in the pack's overrides, as `overrides/mods/<jar>`, for every platform, and warns about each one, approved or not. It stops only when the jar in `mods-local/` no longer matches the manifest: run `modpack manifest`, then approve the new jar.
 
 A CurseForge pack accepts an embedded jar only if it is on CurseForge's approved list of third-party mods. That list has no API: the warning says to check it by hand.
+
+## Local resource packs
+
+Everything above holds for a resource pack no platform serves, such as the pack's own: its zip goes in `resourcepacks-local/`, its entry has `type = "resourcepack"`, `modpack variant load` copies it into the instance's `resourcepacks/`, and `modpack pack` embeds it as `overrides/resourcepacks/<zip>`. Its file name only has to differ from the other resource packs'.
 
 ## Publication
 

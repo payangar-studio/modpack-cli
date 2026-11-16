@@ -12,7 +12,7 @@ use std::path::Path;
 use serde::Serialize;
 
 use crate::error::Result;
-use crate::model::instance::{InstanceState, Instances, disabled_in_app, drift};
+use crate::model::instance::{InstanceState, Instances, disabled_in_app};
 use crate::model::manifest::{self, Manifest};
 use crate::model::socle::{SocleConfig, VersionCheck, cli_version, compare_versions};
 use crate::ops::local::{LocalMod, local_mods};
@@ -160,13 +160,7 @@ fn instance(root: &Path, dir: &Path, manifest: &Manifest) -> Result<Instance> {
         .variant
         .as_deref()
         .and_then(|variant| Expected::of(root, manifest, variant).ok());
-    let drift: Vec<String> = match &expected {
-        Some(expected) => variant::drift(dir, &state, expected)?,
-        None => drift(dir, &state)?
-            .iter()
-            .map(|p| p.to_string_lossy().into_owned())
-            .collect(),
-    };
+    let drift = variant::drift(dir, &state, expected.as_ref())?;
     let mut disabled = Vec::new();
     for rel in &drift {
         if disabled_in_app(dir, &state, rel)? {
@@ -434,6 +428,11 @@ mod tests {
                 "config/jei.toml",
             ] {
                 state.record(&setup.instance(), file).unwrap();
+            }
+            for key in ["jei", "iris"] {
+                state
+                    .mods
+                    .insert(format!("mods/{key}-1.0.0.jar"), key.to_owned());
             }
             state.save(&setup.instance()).unwrap();
             let mut instances = Instances::default();

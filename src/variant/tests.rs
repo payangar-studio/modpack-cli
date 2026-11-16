@@ -201,6 +201,19 @@ fn state_reflects_exactly_the_files_written() {
             ]
         )
     );
+    let mods: Vec<(&str, &str)> = state
+        .mods
+        .iter()
+        .map(|(p, k)| (p.as_str(), k.as_str()))
+        .collect();
+    assert_eq!(
+        mods,
+        [
+            ("mods/a-1.0.0.jar", "a"),
+            ("mods/b-1.0.0.jar", "b"),
+            ("mods/c-1.0.0.jar", "c")
+        ]
+    );
 
     // Back from `server`, its own config file is removed.
     s.load("server", false).unwrap();
@@ -595,6 +608,41 @@ fn a_file_gone_from_the_instance_and_the_variant_is_not_drift() {
     let state = s.state();
     assert!(!state.files.contains_key("mods/b-1.0.0.jar"));
     assert!(!state.files.contains_key("config/sub/b.toml"));
+}
+
+#[test]
+fn a_jar_deleted_while_the_variant_has_its_mod_under_another_name_is_drift() {
+    let s = Setup::new();
+    s.load(variants::DEFAULT_VARIANT, false).unwrap();
+    assert_eq!(
+        s.state().mods.get("mods/b-1.0.0.jar").map(String::as_str),
+        Some("b")
+    );
+    fs::remove_file(s.instance().join("mods/b-1.0.0.jar")).unwrap();
+    // The manifest moved `b` to a jar under another name meanwhile.
+    let path = s.root().join(manifest::FILE_NAME);
+    let mut m = Manifest::load(&path).unwrap();
+    let mut b2 = entry("b", b"b2");
+    b2.path = "mods/b-2.0.0.jar".into();
+    m.upsert(b2);
+    m.save(&path).unwrap();
+    write(s.root(), "mods/b-2.0.0.jar", "b2");
+
+    let err = s.load(variants::DEFAULT_VARIANT, false).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Blocked);
+    assert!(err.to_string().contains("\n  - mods/b-1.0.0.jar"), "{err}");
+    assert!(!s.instance().join("mods/b-2.0.0.jar").exists());
+
+    // A jar whose mod the state does not name cannot be told dropped either.
+    let mut state = s.state();
+    state.mods.clear();
+    state.save(&s.instance()).unwrap();
+    write(
+        s.root(),
+        variants::FILE_NAME,
+        "[default]\nremove = [\"extra\", \"b\"]\n",
+    );
+    assert!(s.load(variants::DEFAULT_VARIANT, false).is_err());
 }
 
 #[test]

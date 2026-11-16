@@ -34,7 +34,7 @@ One JSON object on stdout (exit code 0 whatever it reports). What matters here:
 - `instance`: `null` means this machine has no instance for the pack. Say so, suggest `modpack setup`, and stop.
 - `instance.path`: the instance directory. `instance.variant`: the variant loaded last (`null`: none yet).
 - `instance.unknown_jars`: jars of the instance's `mods/` that no manifest entry has, by hash, with `path` relative to the instance, `sha1` and `sha512`.
-- `instance.drift`: files the CLI wrote into the instance that were changed or deleted since, relative to the instance. A file already as the repository would write it for the loaded variant (same content, or gone from both) is not listed.
+- `instance.drift`: files the CLI wrote into the instance that were changed or deleted since, relative to the instance. A file already as the repository would write it for the loaded variant (same content, or gone from both; for a jar, its mod gone from the variant) is not listed.
 - `instance.disabled`: the jars of `drift` the user disabled in the Modrinth App (renamed `<jar>.disabled`).
 - `instance.outdated_jars`: jars an earlier load left that the manifest no longer has, such as the previous build of a local mod (`local_mod`). Nothing to bring back: mention them, `modpack variant load <variant>` replaces them.
 - `manifest.stale`, `missing_jars`: state of the repository itself. Mention them, they are not this skill's job (`modpack manifest`, `modpack install`).
@@ -146,4 +146,4 @@ Never edit `variants.toml` to place a new mod: `--variant` does it. Editing it b
 1. `modpack status --json`: the integrated jars are no longer in `unknown_jars`, `manifest.stale` is `false`, and `drift` holds only the changes the user chose to drop.
 2. `modpack test --json`, for the static conditions of the variants, `side` included (a failure is reported, not fixed silently).
 3. `git status --short` and `git diff --stat`: show what changed in the repository and suggest a commit. Do not commit without the user's go.
-4. A dropped change stays in `drift` until `modpack variant load <variant> --force` rewrites it from the repository; run it only with the user's go, since it discards that change. With nothing left in `drift`, `modpack variant load <variant>` needs no `--force`.
+4. A dropped change stays in `drift` until `modpack variant load <variant> --force` rewrites it from the repository; run it only with the user's go, since it discards that change. With nothing left in `drift`, drift no longer asks for `--force` (a foreign file in the way still does, and says so).

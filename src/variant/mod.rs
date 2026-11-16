@@ -91,7 +91,7 @@ pub fn load(ctx: &LoadContext<'_>, variant: &str, force: bool) -> Result<LoadRep
     let state = InstanceState::load(&instance)?;
     let expected = Expected::new(&manifest, &resolved, config_files(root, variant)?);
     let configs = &expected.configs;
-    let drifted = drift(&instance, &state, &expected)?;
+    let drifted = drift(&instance, &state, Some(&expected))?;
     let mut disabled = Vec::new();
     for rel in &drifted {
         if disabled_in_app(&instance, &state, rel)? {
@@ -126,7 +126,7 @@ pub fn load(ctx: &LoadContext<'_>, variant: &str, force: bool) -> Result<LoadRep
     // Sort the instance's jars: the variant's, other known ones, unknown ones.
     let mut new_state = InstanceState {
         variant: Some(variant.to_owned()),
-        files: BTreeMap::new(),
+        ..Default::default()
     };
     let mut present = BTreeSet::new();
     let mut to_remove = Vec::new();
@@ -135,6 +135,7 @@ pub fn load(ctx: &LoadContext<'_>, variant: &str, force: bool) -> Result<LoadRep
         match manifest.mods.iter().find(|e| hashes.matches(&e.hashes)) {
             Some(e) if in_variant.contains(e.key.as_str()) => {
                 present.insert(e.key.as_str());
+                new_state.mods.insert(rel.clone(), e.key.clone());
                 new_state.files.insert(rel, hashes.sha256);
             }
             Some(_) => to_remove.push(rel),
@@ -146,13 +147,13 @@ pub fn load(ctx: &LoadContext<'_>, variant: &str, force: bool) -> Result<LoadRep
     }
     let mut to_copy = Vec::new();
     for entry in wanted.iter().filter(|e| !present.contains(e.key.as_str())) {
-        to_copy.push((jar_path(root, entry)?, entry.instance_path()));
+        to_copy.push((jar_path(root, entry)?, entry.instance_path(), &entry.key));
     }
 
     // A foreign file where a jar of the variant goes is never overwritten silently.
     let in_the_way: Vec<String> = to_copy
         .iter()
-        .map(|(_, rel)| rel.clone())
+        .map(|(_, rel, _)| rel.clone())
         .filter(|rel| instance.join(rel).exists() && !to_remove.contains(rel))
         .collect();
     if !in_the_way.is_empty() && !force {
@@ -209,9 +210,10 @@ pub fn load(ctx: &LoadContext<'_>, variant: &str, force: bool) -> Result<LoadRep
         fs::remove_file(&path).context(format!("removing {}", path.display()))?;
         report.removed.push(rel);
     }
-    for (source, rel) in to_copy {
+    for (source, rel, key) in to_copy {
         copy_file(&source, &instance.join(&rel))?;
         new_state.record(&instance, &rel)?;
+        new_state.mods.insert(rel.clone(), key.clone());
         report.copied.push(rel);
     }
     // Forced past a jar the app disabled: the repository wins, so the jar is
@@ -251,10 +253,11 @@ pub fn load(ctx: &LoadContext<'_>, variant: &str, force: bool) -> Result<LoadRep
 
 /// What loading a variant leaves in the instance, by path relative to it: its
 /// config files, by their source in the repository, and its jars, by their
-/// manifest hashes.
+/// manifest hashes. Also the keys of its mods.
 pub struct Expected {
     configs: BTreeMap<String, PathBuf>,
     jars: BTreeMap<String, Hashes>,
+    keys: BTreeSet<String>,
 }
 
 impl Expected {
@@ -265,7 +268,11 @@ impl Expected {
             .filter_map(|k| manifest.get(k))
             .map(|e| (e.instance_path(), e.hashes.clone()))
             .collect();
-        Self { configs, jars }
+        Self {
+            configs,
+            jars,
+            keys: resolved.keys.iter().cloned().collect(),
+        }
     }
 
     /// What loading `variant` from the repository at `root` would leave in
@@ -277,14 +284,25 @@ impl Expected {
 
     /// Whether `relative`, a file the CLI wrote into `instance`, is already as
     /// loading the variant would leave it: present with the content the
-    /// repository has for it, or gone where the variant writes nothing. A jar
-    /// the app disabled is not: loading removes its `.disabled` copy.
+    /// repository has for it, or gone where the variant writes nothing. A
+    /// jar gone is in sync only once the variant no longer has its mod, under
+    /// any file name, and not when the app disabled it: loading removes its
+    /// `.disabled` copy.
     fn in_sync(&self, instance: &Path, state: &InstanceState, relative: &str) -> Result<bool> {
         let path = instance.join(relative);
         if !path.exists() {
-            return Ok(!self.configs.contains_key(relative)
-                && !self.jars.contains_key(relative)
-                && !disabled_in_app(instance, state, relative)?);
+            if self.configs.contains_key(relative) || self.jars.contains_key(relative) {
+                return Ok(false);
+            }
+            if relative.starts_with(&format!("{MODS_DIR}/")) {
+                // Without a recorded key, nothing tells which mod it was.
+                let dropped = state
+                    .mods
+                    .get(relative)
+                    .is_some_and(|key| !self.keys.contains(key));
+                return Ok(dropped && !disabled_in_app(instance, state, relative)?);
+            }
+            return Ok(true);
         }
         if let Some(source) = self.configs.get(relative) {
             return same_content(source, &path);
@@ -301,11 +319,20 @@ impl Expected {
 /// Files of the instance changed or gone since the CLI wrote them, relative
 /// to the instance with `/` separators, sorted, but those already as loading
 /// `expected`'s variant would leave them: loading would lose nothing there.
-pub fn drift(instance: &Path, state: &InstanceState, expected: &Expected) -> Result<Vec<String>> {
+/// Without `expected`, every change counts.
+pub fn drift(
+    instance: &Path,
+    state: &InstanceState,
+    expected: Option<&Expected>,
+) -> Result<Vec<String>> {
     let mut drifted = Vec::new();
     for rel in instance::drift(instance, state)? {
         let rel = rel.to_string_lossy().into_owned();
-        if !expected.in_sync(instance, state, &rel)? {
+        let in_sync = match expected {
+            Some(expected) => expected.in_sync(instance, state, &rel)?,
+            None => false,
+        };
+        if !in_sync {
             drifted.push(rel);
         }
     }

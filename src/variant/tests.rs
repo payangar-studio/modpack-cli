@@ -560,3 +560,59 @@ fn a_local_mod_is_copied_from_mods_local_into_the_instance_mods() {
     );
     assert!(!err.hint().contains("modpack install"), "{}", err.hint());
 }
+
+#[test]
+fn an_instance_file_the_repository_now_has_is_not_drift() {
+    let s = Setup::new();
+    s.load(variants::DEFAULT_VARIANT, false).unwrap();
+    write(&s.instance(), "config/a.toml", "changed in game");
+    write(s.root(), "config/a.toml", "changed in game");
+
+    let report = s.load(variants::DEFAULT_VARIANT, false).unwrap();
+    assert!(report.forced.is_empty(), "{report:?}");
+    assert!(report.written.is_empty(), "{report:?}");
+    assert_eq!(
+        s.state().files.get("config/a.toml"),
+        on_disk(&s.instance(), &["config/a.toml"]).get("config/a.toml")
+    );
+}
+
+#[test]
+fn a_file_gone_from_the_instance_and_the_variant_is_not_drift() {
+    let s = Setup::new();
+    s.load(variants::DEFAULT_VARIANT, false).unwrap();
+    fs::remove_file(s.instance().join("mods/b-1.0.0.jar")).unwrap();
+    fs::remove_file(s.instance().join("config/sub/b.toml")).unwrap();
+    write(
+        s.root(),
+        variants::FILE_NAME,
+        "[default]\nremove = [\"extra\", \"b\"]\n",
+    );
+    fs::remove_file(s.root().join("config/sub/b.toml")).unwrap();
+
+    let report = s.load(variants::DEFAULT_VARIANT, false).unwrap();
+    assert!(report.forced.is_empty(), "{report:?}");
+    let state = s.state();
+    assert!(!state.files.contains_key("mods/b-1.0.0.jar"));
+    assert!(!state.files.contains_key("config/sub/b.toml"));
+}
+
+#[test]
+fn a_jar_disabled_in_the_app_stays_drift_once_the_variant_drops_it() {
+    let s = Setup::new();
+    s.load(variants::DEFAULT_VARIANT, false).unwrap();
+    fs::rename(
+        s.instance().join("mods/a-1.0.0.jar"),
+        s.instance().join("mods/a-1.0.0.jar.disabled"),
+    )
+    .unwrap();
+
+    // `server` has no `a`, but its disabled copy is still in the instance.
+    let err = s.load("server", false).unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::Blocked);
+    assert!(
+        err.to_string()
+            .contains("mods/a-1.0.0.jar (disabled in the app)"),
+        "{err}"
+    );
+}
